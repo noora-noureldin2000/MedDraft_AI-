@@ -1,0 +1,133 @@
+{
+  "skills": [
+    "literature-review",
+    "concept-development",
+    "concept-validation",
+    "parallel-search",
+    "project-management",
+    "draft-writing",
+    "reference-management",
+    "word-export",
+    "auto-paper",
+    "academic-debate",
+    "idea-validation",
+    "manuscript-review",
+    "submission-preparation",
+    "git-precommit"
+  ],
+  "prompts": [
+    "mdpaper.write-paper",
+    "mdpaper.literature-survey",
+    "mdpaper.manuscript-revision",
+    "mdpaper.search",
+    "mdpaper.concept",
+    "mdpaper.draft",
+    "mdpaper.project",
+    "mdpaper.format",
+    "mdpaper.strategy",
+    "mdpaper.analysis",
+    "mdpaper.clarify",
+    "mdpaper.help",
+    "mdpaper.audit"
+  ],
+  "agents": [
+    "concept-challenger",
+    "domain-reviewer",
+    "literature-searcher",
+    "meta-learner",
+    "methodology-reviewer",
+    "paper-reviewer",
+    "reference-analyzer",
+    "review-orchestrator",
+    "statistics-reviewer"
+  ],
+  "templates": [
+    "journal-profile.template.yaml",
+    "csl/apa.csl",
+    "csl/vancouver.csl",
+    "csl/vancouver-superscript.csl"
+  ],
+  "supportFiles": [
+    {
+      "name": "_capability-index.md",
+      "source": ".github/prompts/_capability-index.md",
+      "destination": "prompts/_capability-index.md",
+      "workspaceDestination": ".github/prompts/_capability-index.md"
+    },
+    {
+      "name": "copilot-instructions.md",
+      "source": ".github/copilot-instructions.md",
+      "destination": "copilot-instructions.md",
+      "workspaceDestination": ".github/copilot-instructions.md"
+    },
+    {
+      "name": ".copilot-mode.json",
+      "source": ".copilot-mode.json",
+      "destination": ".copilot-mode.json",
+      "workspaceDestination": ".copilot-mode.json"
+    },
+    {
+      "name": "foam.md",
+      "source": "docs/reference/foam.md",
+      "destination": "docs/reference/foam.md",
+      "workspaceDestination": "docs/reference/foam.md"
+    },
+    {
+      "name": "llm-wiki-reference.md",
+      "source": "docs/reference/llm-wiki.md",
+      "destination": "docs/reference/llm-wiki.md",
+      "workspaceDestination": "docs/reference/llm-wiki.md"
+    },
+    {
+      "name": "llm-wiki-how-to.md",
+      "source": "docs/how-to/llm-wiki.md",
+      "destination": "docs/how-to/llm-wiki.md",
+      "workspaceDestination": "docs/how-to/llm-wiki.md"
+    },
+    {
+      "name": "medpaper-llm-wiki-workflow.png",
+      "source": "docs/assets/medpaper_llm_wiki_workflow_clean.png",
+      "destination": "docs/assets/medpaper_llm_wiki_workflow_clean.png",
+      "workspaceDestination": "docs/assets/medpaper_llm_wiki_workflow_clean.png"
+    }
+  ],
+  "chatCommands": [
+    "search",
+    "draft",
+    "concept",
+    "project",
+    "format",
+    "autopaper",
+    "drawio",
+    "analysis",
+    "strategy",
+    "help"
+  ],
+  "paletteCommands": [
+    "mdpaper.startServer",
+    "mdpaper.stopServer",
+    "mdpaper.showStatus",
+    "mdpaper.autoPaper",
+    "mdpaper.setupWorkspace",
+    "mdpaper.openLlmWikiGuide",
+    "mdpaper.showGraphDefault",
+    "mdpaper.showGraphEvidence",
+    "mdpaper.showGraphWriting",
+    "mdpaper.showGraphAssets",
+    "mdpaper.showGraphReview"
+  ],
+  "pythonSources": [
+    {
+      "name": "med_paper_assistant",
+      "source": "src/med_paper_assistant",
+      "destination": "bundled/tool/med_paper_assistant",
+      "required": true
+    },
+    {
+      "name": "cgu",
+      "source": "integrations/cgu/src/cgu",
+      "destination": "bundled/tool/cgu",
+      "required": false
+    }
+  ]
+}

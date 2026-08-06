@@ -1,0 +1,11 @@
+{
+  "name": "aipoch/citation-management",
+  "version": "0.1.0",
+  "private": true,
+  "summary": "Use when working with citation management",
+  "skills": {
+    "citation-management": {
+      "path": "SKILL.md"
+    }
+  }
+}

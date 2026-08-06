@@ -1,0 +1,23 @@
+{
+  "keywords": [
+    "anesthesia",
+    "ICU",
+    "transfer",
+    "transport",
+    "intrahospital",
+    "critically ill"
+  ],
+  "exclusions": [
+    "pediatric",
+    "neonatal",
+    "veterinary"
+  ],
+  "article_types": [
+    "Journal Article",
+    "Review",
+    "Clinical Trial",
+    "Meta-Analysis"
+  ],
+  "min_sample_size": 0,
+  "date_range": "2016-2026"
+}

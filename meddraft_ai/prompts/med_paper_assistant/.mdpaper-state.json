@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "current_project": "med-paper-assistant-release-v0.7.10",
+  "last_activity": "2026-05-13T13:51:44.808663",
+  "last_updated": "2026-05-13T13:51:44.808663",
+  "workspace_state": {
+    "open_drafts": [],
+    "pending_validations": [],
+    "last_search_pmids": [],
+    "last_tool_called": "release_validation"
+  },
+  "recovery_hints": {
+    "agent_was_doing": "Prepared v0.7.10 upstream sync release and fixed Windows CI UTF-8 test decoding",
+    "next_suggested_action": "Push master, move v0.7.10 annotated tag to latest HEAD, and verify GitHub Actions",
+    "important_context": [
+      "release_commit=bd5d4c2",
+      "ci_fix_commit=db9c5e1",
+      "vsix=vscode-extension/medpaper-assistant-0.7.10.vsix",
+      "validation=uv lock/ruff/mypy/pytest/smoke/bundle/npm test/npm validate passed"
+    ]
+  },
+  "cross_mcp_state": {
+    "pubmed_session_active": false,
+    "cgu_session_active": false
+  },
+  "pipeline_state": {
+    "active": false,
+    "project": null,
+    "current_phase": null,
+    "current_phase_name": null,
+    "current_round": null,
+    "last_gate_result": null,
+    "last_gate_failures": [],
+    "last_gate_details": null,
+    "next_required_action": null,
+    "phases_passed": [],
+    "phases_remaining": [],
+    "review_verdict": null,
+    "last_heartbeat": null
+  },
+  "writing_session": {
+    "active": false,
+    "current_section": null,
+    "last_file_modified": null,
+    "last_operation": null,
+    "word_count": 0,
+    "sections_on_disk": [],
+    "timestamp": null,
+    "agent_context": null
+  }
+}

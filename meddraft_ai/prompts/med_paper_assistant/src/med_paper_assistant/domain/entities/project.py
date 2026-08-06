@@ -1,0 +1,168 @@
+"""
+Project Entity - Represents a research paper project.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Union
+
+from med_paper_assistant.domain.value_objects.author import Author
+from med_paper_assistant.shared.constants import (
+    DEFAULT_WORKFLOW_MODE,
+    PAPER_TYPES,
+    WORKFLOW_MODES,
+)
+
+
+class ProjectStatus(Enum):
+    """Project lifecycle status."""
+
+    CONCEPT = "concept"
+    DRAFTING = "drafting"
+    REVIEW = "review"
+    SUBMITTED = "submitted"
+    PUBLISHED = "published"
+
+
+@dataclass
+class Project:
+    """
+    Research paper project entity.
+
+    A project is an isolated workspace containing all materials
+    for a single research paper.
+    """
+
+    name: str
+    slug: str
+    path: Path
+
+    # Metadata
+    description: str = ""
+    authors: List[Union[str, Author]] = field(default_factory=list)
+    target_journal: str = ""
+    paper_type: str = ""
+    workflow_mode: str = DEFAULT_WORKFLOW_MODE
+
+    # Status tracking
+    status: str = "concept"  # concept → drafting → review → submitted → published
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    # User preferences
+    interaction_preferences: Dict[str, Any] = field(default_factory=dict)
+    memo: str = ""
+
+    @property
+    def paper_type_info(self) -> Dict[str, Any]:
+        """Get paper type configuration."""
+        return PAPER_TYPES.get(self.paper_type, {})
+
+    @property
+    def workflow_mode_info(self) -> Dict[str, Any]:
+        """Get workflow mode configuration."""
+        return WORKFLOW_MODES.get(self.workflow_mode, {})
+
+    @property
+    def sections(self) -> List[str]:
+        """Get expected sections for this paper type."""
+        return self.paper_type_info.get("sections", [])
+
+    @property
+    def drafts_dir(self) -> Path:
+        return self.path / "drafts"
+
+    @property
+    def references_dir(self) -> Path:
+        return self.path / "references"
+
+    @property
+    def data_dir(self) -> Path:
+        return self.path / "data"
+
+    @property
+    def results_dir(self) -> Path:
+        return self.path / "results"
+
+    @property
+    def inbox_dir(self) -> Path:
+        """Inbox directory for raw unorganized notes (Library Wiki mode)."""
+        return self.path / "inbox"
+
+    @property
+    def concepts_dir(self) -> Path:
+        """Concepts directory for atomic knowledge notes (Library Wiki mode)."""
+        return self.path / "concepts"
+
+    @property
+    def projects_dir(self) -> Path:
+        """Projects directory for synthesis/actionable notes (Library Wiki mode)."""
+        return self.path / "projects"
+
+    @property
+    def memory_dir(self) -> Path:
+        return self.path / ".memory"
+
+    @property
+    def concept_file(self) -> Path:
+        return self.path / "concept.md"
+
+    @property
+    def config_file(self) -> Path:
+        return self.path / "project.json"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "name": self.name,
+            "slug": self.slug,
+            "description": self.description,
+            "authors": self.authors,
+            "target_journal": self.target_journal,
+            "paper_type": self.paper_type,
+            "paper_type_info": self.paper_type_info,
+            "workflow_mode": self.workflow_mode,
+            "workflow_mode_info": self.workflow_mode_info,
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "interaction_preferences": self.interaction_preferences,
+            "memo": self.memo,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], path: Path) -> "Project":
+        """Create from dictionary."""
+        return cls(
+            name=data.get("name", ""),
+            slug=data.get("slug", ""),
+            path=path,
+            description=data.get("description", ""),
+            authors=data.get("authors", []),
+            target_journal=data.get("target_journal", ""),
+            paper_type=data.get("paper_type", ""),
+            workflow_mode=data.get("workflow_mode", DEFAULT_WORKFLOW_MODE),
+            status=data.get("status", "concept"),
+            created_at=datetime.fromisoformat(data["created_at"])
+            if "created_at" in data
+            else datetime.now(),
+            updated_at=datetime.fromisoformat(data["updated_at"])
+            if "updated_at" in data
+            else datetime.now(),
+            interaction_preferences=data.get("interaction_preferences", {}),
+            memo=data.get("memo", ""),
+        )
+
+    @staticmethod
+    def generate_slug(name: str) -> str:
+        """Generate URL-safe slug from project name."""
+        import re
+
+        slug = name.lower().strip()
+        slug = re.sub(r"[\s_]+", "-", slug)
+        slug = re.sub(r"[^a-z0-9\-]", "", slug)
+        slug = re.sub(r"-+", "-", slug)
+        slug = slug.strip("-")
+        return slug or "untitled"

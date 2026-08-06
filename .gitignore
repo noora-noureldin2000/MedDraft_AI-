@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+
+# Node.js
+node_modules/
+dist/
+
+# Outputs & Downloads
+outputs/
+downloaded_papers/
+pdf_extractions/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+desktop.ini
+Thumbs.db

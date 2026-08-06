@@ -1,0 +1,175 @@
+name: Package skills and release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scientific-skills/**'
+      - 'awesome-med-research-skills/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check release and detect changes
+        id: setup
+        run: |
+          mkdir -p dist
+          touch /tmp/deleted_skills.txt
+
+          # Check if latest release exists
+          if gh release view latest >/dev/null 2>&1; then
+            echo "Release 'latest' exists"
+
+            # Check for last-packaged tag
+            if git rev-parse refs/tags/last-packaged >/dev/null 2>&1; then
+              last_sha=$(git rev-parse refs/tags/last-packaged)
+              echo "Found last-packaged tag at: $last_sha"
+              echo "mode=incremental" >> "$GITHUB_OUTPUT"
+
+              git diff --name-only "$last_sha" HEAD \
+                | grep -E "^(scientific-skills|awesome-med-research-skills)/" \
+                | while IFS= read -r file; do echo "$(echo "$file" | cut -d'/' -f1-3)"; done \
+                | sort -u > /tmp/changed_skills.txt || true
+
+              echo "Changed skill directories:"
+              cat /tmp/changed_skills.txt
+            else
+              echo "No last-packaged tag — full repackage"
+              echo "mode=all" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No latest release — full repackage"
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Debug mode
+        run: echo "Mode is '${{ steps.setup.outputs.mode }}'"
+
+      - name: Package all skills (full)
+        if: steps.setup.outputs.mode == 'all'
+        run: |
+          for root in "scientific-skills" "awesome-med-research-skills"; do
+            for category in "Academic Writing" "Data Analysis" "Evidence Insight" "Protocol Design" "Other"; do
+              [ -d "$root/$category" ] || continue
+              find "$root/$category" -mindepth 1 -maxdepth 1 -type d | while IFS= read -r dir; do
+                name=$(basename "$dir")
+                (cd "$(dirname "$dir")" && zip -r "$GITHUB_WORKSPACE/dist/${name}.zip" "$name" \
+                  --exclude "*/node_modules/*" \
+                  --exclude "*/.venv/*" \
+                  --exclude "*/venv/*" \
+                  --exclude "*/__pycache__/*" \
+                  --exclude "*.pyc" \
+                  --exclude "*result*.json")
+              done
+            done
+          done
+          echo "Total: $(ls dist/*.zip | wc -l) zips"
+
+      - name: Package changed skills only (incremental)
+        if: steps.setup.outputs.mode == 'incremental'
+        run: |
+          while IFS= read -r skill_dir; do
+            [ -z "$skill_dir" ] && continue
+            name=$(basename "$skill_dir")
+            # Search by skill name across ALL categories, not just the old path
+            actual_dir=$(find scientific-skills awesome-med-research-skills -mindepth 2 -maxdepth 2 -type d -name "$name" 2>/dev/null | head -1)
+            if [ -n "$actual_dir" ]; then
+              echo "Zipping: $name (at $actual_dir)"
+              (cd "$(dirname "$actual_dir")" && zip -r "$GITHUB_WORKSPACE/dist/${name}.zip" "$name" \
+                --exclude "*/node_modules/*" \
+                --exclude "*/.venv/*" \
+                --exclude "*/venv/*" \
+                --exclude "*/__pycache__/*" \
+                --exclude "*.pyc" \
+                --exclude "*result*.json")
+            else
+              echo "Deleted: $name"
+              echo "$name" >> /tmp/deleted_skills.txt
+            fi
+          done < /tmp/changed_skills.txt
+          echo "Updated: $(ls dist/*.zip 2>/dev/null | wc -l) zip(s), Deleted: $(wc -l < /tmp/deleted_skills.txt)"
+
+      - name: Ensure release exists
+        if: steps.setup.outputs.mode == 'all'
+        run: |
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest \
+              --title "Skill Packages (auto-updated)" \
+              --notes "Auto-generated on every push to main."
+          else
+            echo "Release already exists, skipping creation"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload zips in batches
+        id: upload
+        run: |
+          if ! ls dist/*.zip 2>/dev/null | grep -q .; then
+            echo "No zips to upload"
+            echo "uploaded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          upload_with_retry() {
+            local max_attempts=3
+            for attempt in $(seq 1 $max_attempts); do
+              if gh release upload latest "$@" --clobber; then
+                return 0
+              fi
+              echo "Attempt $attempt failed, retrying in 30s..."
+              sleep 30
+            done
+            echo "Failed after $max_attempts attempts"
+            return 1
+          }
+          files=(dist/*.zip)
+          total=${#files[@]}
+          batch_size=20
+          echo "Uploading $total files in batches of $batch_size..."
+          for ((i=0; i<total; i+=batch_size)); do
+            batch=("${files[@]:i:batch_size}")
+            upload_with_retry "${batch[@]}"
+            echo "Progress: $((i + ${#batch[@]})) / $total"
+            [ $((i + batch_size)) -lt $total ] && sleep 15
+          done
+          echo "Uploaded $total zip(s)"
+          echo "uploaded=true" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove deleted skills from release (incremental)
+        if: steps.setup.outputs.mode == 'incremental'
+        run: |
+          if [ -s /tmp/deleted_skills.txt ]; then
+            while IFS= read -r name; do
+              echo "Removing: ${name}.zip"
+              gh release delete-asset latest "${name}.zip" --yes 2>/dev/null || true
+            done < /tmp/deleted_skills.txt
+          else
+            echo "No skills deleted"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mark last packaged commit
+        run: |
+          sha=$(git rev-parse HEAD)
+          if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/last-packaged" >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/last-packaged" -X PATCH -f sha="$sha" -F force=true
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -X POST -f ref="refs/tags/last-packaged" -f sha="$sha"
+          fi
+          echo "last-packaged tag updated to $sha"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

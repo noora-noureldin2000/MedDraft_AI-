@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-platform-smoke:
+    name: "Cross-Platform Smoke (${{ matrix.label }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: ubuntu-latest
+          - os: windows-latest
+            label: windows-latest
+          - os: macos-14
+            label: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          uv sync --all-extras
+          uv pip install -e integrations/pubmed-search-mcp
+          uv pip install -e integrations/cgu
+
+      - name: Install VS Code extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Verify integration helper (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./scripts/setup-integrations.sh
+          ./scripts/start-drawio.sh
+
+      - name: Verify integration helper (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/setup-integrations.ps1
+          ./scripts/start-drawio.ps1
+
+      - name: Run Python and MCP smoke tests
+        shell: bash
+        run: uv run pytest tests/test_export_pipeline.py tests/test_figure_embedding.py tests/test_config_paths.py tests/test_copilot_hook_guard.py tests/test_mcp_integration.py -q
+
+      - name: Verify MCP server boots directly
+        run: uv run python scripts/verify_mcp_server_boot.py
+
+      - name: Run VS Code extension smoke tests
+        working-directory: vscode-extension
+        run: npm test -- --run src/test/uvManager.test.ts src/test/packaging.test.ts src/test/extensionHelpers.test.ts src/test/workflows.test.ts
+
+  # ──────────────────────────────────────────────────────
+  # Python: lint, type check, security, tests
+  # ──────────────────────────────────────────────────────
+  python-lint:
+    name: "Python Lint & Security"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras
+          uv pip install -e integrations/pubmed-search-mcp
+          uv pip install -e integrations/cgu
+
+      - name: Lint (ruff check)
+        run: uv run ruff check src/ tests/
+
+      - name: Format check (ruff format)
+        run: uv run ruff format --check src/ tests/
+
+      - name: Type check (mypy)
+        run: uv run mypy src/ --ignore-missing-imports
+
+      - name: Security scan (bandit)
+        run: uv run bandit -c pyproject.toml -r src/
+
+  python-test:
+    name: "Python Tests"
+    runs-on: ubuntu-latest
+    needs: [cross-platform-smoke, python-lint]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras
+          uv pip install -e integrations/pubmed-search-mcp
+          uv pip install -e integrations/cgu
+
+      - name: Run tests
+        run: uv run pytest tests/ -x -q --timeout=60 -m "not integration and not slow"
+
+      - name: Verify MCP server boots
+        run: uv run python scripts/verify_mcp_server_boot.py
+
+  # ──────────────────────────────────────────────────────
+  # VS Code Extension: compile, test
+  # ──────────────────────────────────────────────────────
+  vsx:
+    name: "VS Code Extension"
+    runs-on: ubuntu-latest
+    needs: cross-platform-smoke
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Check committed bundle drift
+        working-directory: vscode-extension
+        run: npm run bundle:check
+
+      - name: Sync bundled assets for build-time validation
+        working-directory: vscode-extension
+        run: npm run bundle:sync
+
+      - name: Compile TypeScript
+        working-directory: vscode-extension
+        run: npm run compile
+
+      - name: Run extension validate
+        working-directory: vscode-extension
+        run: npm run validate
+
+  # ──────────────────────────────────────────────────────
+  # Dashboard: build check
+  # ──────────────────────────────────────────────────────
+  dashboard:
+    name: "Dashboard Build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Lint
+        working-directory: dashboard
+        run: npm run lint
+
+      - name: Build
+        working-directory: dashboard
+        run: npm run build
+
+  # ──────────────────────────────────────────────────────
+  # Markdown: prettier format check
+  # ──────────────────────────────────────────────────────
+  markdown:
+    name: "Markdown Format"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check markdown formatting
+        run: npx prettier@3.1.0 --check --prose-wrap preserve "**/*.md" "!integrations/**" "!node_modules/**" "!.venv/**" "!projects/**"

@@ -1,0 +1,22 @@
+{
+  "name": "meddraft-ai-browser-engine",
+  "version": "1.0.0",
+  "description": "Stealth browser engine for MedDraft_AI literature search.",
+  "main": "meddraft_ai/search/browser_engine/dist/cli.js",
+  "type": "module",
+  "scripts": {
+    "build": "cd meddraft_ai/search/browser_engine && tsc",
+    "start": "node meddraft_ai/search/browser_engine/dist/cli.js",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

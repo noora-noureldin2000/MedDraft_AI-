@@ -1,0 +1,1584 @@
+"""Tests for PipelineGateValidator — hard gate enforcement."""
+
+import json
+import zipfile
+
+import pytest
+import yaml
+
+from med_paper_assistant.infrastructure.persistence.data_artifact_tracker import DataArtifactTracker
+from med_paper_assistant.infrastructure.persistence.pipeline_gate_validator import (
+    GateCheck,
+    GateResult,
+    PipelineGateValidator,
+)
+
+
+@pytest.fixture
+def project_dir(tmp_path):
+    """Create a minimal project directory structure."""
+    p = tmp_path / "test-project"
+    for d in ["drafts", "references", "data", "results", ".audit", ".memory", "exports"]:
+        (p / d).mkdir(parents=True)
+    return p
+
+
+@pytest.fixture
+def validator(project_dir):
+    return PipelineGateValidator(project_dir)
+
+
+def _add_prerequisites(project_dir, up_to_phase: int):
+    """Add prerequisite artifacts needed so that validate_phase(up_to_phase) won't
+    fail on prerequisite checks.
+
+    Uses the same numeric comparison as _check_prerequisites in production code.
+    Phase 65 (Evolution Gate) works correctly because 65 >= 7 (manuscript) and
+    65 >= 9 (scorecard) are both True, while 65 == 11 (exports) is False.
+    """
+    if up_to_phase >= 2:
+        pj = project_dir / "project.json"
+        if not pj.is_file():
+            pj.write_text('{"slug": "test"}')
+    if up_to_phase >= 3:
+        # Must meet paper-type minimum (default original-research = 20)
+        refs = project_dir / "references"
+        for i in range(20):
+            ref_dir = refs / f"ref-{i}"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            meta = ref_dir / "metadata.json"
+            if not meta.is_file():
+                meta.write_text(f'{{"pmid": "0000{i}"}}')
+    if up_to_phase >= 4:
+        concept = project_dir / "concept.md"
+        if not concept.is_file():
+            concept.write_text("# NOVELTY\n\nNew idea\n\n# KEY SELLING POINTS\n\n- Point A")
+        concept_review = project_dir / ".audit" / "concept-review.yaml"
+        if not concept_review.is_file():
+            concept_review.write_text(
+                "metadata:\n"
+                "  generated_at: '2026-01-01T00:00:00'\n"
+                "review:\n"
+                "  readiness: ready\n"
+                "research_question:\n"
+                "  canonical_question: Does intervention X improve outcome Y?\n"
+                "claims_required:\n"
+                "  - id: claim-1\n"
+                "    text: Intervention X improves outcome Y.\n"
+                "protected_content:\n"
+                "  novelty_statement_locked:\n"
+                "    present: true\n"
+                "  selling_points_locked:\n"
+                "    present: true\n"
+            )
+        concept_validation = project_dir / ".audit" / "concept-validation.md"
+        if not concept_validation.is_file():
+            concept_validation.write_text("# Concept Validation")
+    if up_to_phase >= 5:
+        concept = project_dir / "concept.md"
+        if not concept.is_file():
+            concept.write_text("# NOVELTY\n\nNew idea\n\n# KEY SELLING POINTS\n\n- Point A")
+    if up_to_phase >= 7:
+        ms = project_dir / "drafts" / "manuscript.md"
+        if not ms.is_file():
+            ms.write_text("# Manuscript\n\nBody text.\n\n## References\n\n")
+    if up_to_phase >= 9:
+        sc = project_dir / ".audit" / "quality-scorecard.md"
+        if not sc.is_file():
+            sc.write_text("# Scorecard")
+    # Phase 8+ needs completed review loop (Phase 7 prerequisite)
+    if up_to_phase >= 8:
+        loop_state = project_dir / ".audit" / "audit-loop-review.json"
+        if not loop_state.is_file():
+            loop_state.write_text(
+                json.dumps(
+                    {
+                        "config": {"min_rounds": 2, "max_rounds": 3},
+                        "rounds": [
+                            {"round": 1, "verdict": "needs_revision"},
+                            {"round": 2, "verdict": "quality_met"},
+                        ],
+                    }
+                )
+            )
+        for i in [1, 2]:
+            (project_dir / ".audit" / f"review-report-{i}.md").write_text(f"# Round {i}")
+            (project_dir / ".audit" / f"author-response-{i}.md").write_text(f"# Response {i}")
+            (project_dir / ".audit" / f"equator-compliance-{i}.md").write_text(f"# EQUATOR {i}")
+        elog = project_dir / ".audit" / "evolution-log.jsonl"
+        existing = elog.read_text(encoding="utf-8") if elog.is_file() else ""
+        review_entries = [
+            json.dumps({"event": "review_round", "round": 1}),
+            json.dumps({"event": "review_round", "round": 2}),
+        ]
+        if "review_round" not in existing:
+            elog.write_text(existing + "\n".join(review_entries) + "\n", encoding="utf-8")
+    if up_to_phase == 11:
+        exports = project_dir / "exports"
+        exports.mkdir(parents=True, exist_ok=True)
+        _write_minimal_docx(exports / "paper.docx")
+        _write_minimal_pdf(exports / "paper.pdf")
+        audit = project_dir / ".audit"
+        audit_timestamp = "2026-01-01T00:00:00"
+        (audit / "pipeline-run-20260101.md").write_text(
+            "# Pipeline Run\n"
+            "## D7 retrospective: Review Retrospective\nReview retro\n"
+            "## D8 retrospective: EQUATOR Retrospective\nEQUATOR retro\n"
+        )
+        (audit / "hook-effectiveness.md").write_text("# Hook Effectiveness\n")
+        existing = (audit / "evolution-log.jsonl").read_text(encoding="utf-8")
+        if "meta_learning" not in existing:
+            (audit / "evolution-log.jsonl").write_text(
+                existing
+                + json.dumps(
+                    {
+                        "schema": "mdpaper.meta_learning_event.v1",
+                        "event": "meta_learning",
+                        "timestamp": audit_timestamp,
+                        "source_tool": "run_meta_learning",
+                        "audit_timestamp": audit_timestamp,
+                        "run_number": 1,
+                        "adjustments_count": 0,
+                        "lessons_count": 0,
+                        "suggestions_count": 0,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        (audit / "meta-learning-audit.yaml").write_text(
+            yaml.dump(
+                [
+                    {
+                        "schema": "mdpaper.meta_learning_audit.v2",
+                        "timestamp": audit_timestamp,
+                        "source_tool": "run_meta_learning",
+                        "analysis_steps": _analysis_steps(),
+                        "run_number": 1,
+                        "adjustments_count": 0,
+                        "lessons_count": 0,
+                        "suggestions_count": 0,
+                        "adjustments": [],
+                        "lessons": [],
+                        "suggestions": [],
+                    }
+                ],
+                default_flow_style=False,
+            ),
+            encoding="utf-8",
+        )
+
+
+def _write_minimal_docx(path):
+    """Write a minimal structurally valid DOCX fixture."""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types></Types>")
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>"
+            "</w:document>",
+        )
+
+
+def _write_minimal_pdf(path):
+    """Write a minimal parseable one-page PDF fixture."""
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Resources << >> >>",
+    ]
+    payload = b"%PDF-1.4\n"
+    offsets = [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(payload))
+        payload += f"{index} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref_offset = len(payload)
+    payload += f"xref\n0 {len(objects) + 1}\n".encode()
+    payload += b"0000000000 65535 f \n"
+    for offset in offsets[1:]:
+        payload += f"{offset:010d} 00000 n \n".encode()
+    payload += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(payload)
+
+
+def _analysis_steps():
+    return {f"D{i}": {"status": "completed"} for i in range(1, 10)}
+
+
+def _write_review_artifacts(project_dir, rounds: int):
+    audit = project_dir / ".audit"
+    for i in range(1, rounds + 1):
+        (audit / f"review-report-{i}.md").write_text(f"# Round {i} Review\n")
+        (audit / f"author-response-{i}.md").write_text(f"# Round {i} Response\n")
+        (audit / f"equator-compliance-{i}.md").write_text(f"# Round {i} EQUATOR\n")
+    (audit / "evolution-log.jsonl").write_text(
+        "".join(
+            json.dumps({"event": "review_round", "round": i}) + "\n" for i in range(1, rounds + 1)
+        ),
+        encoding="utf-8",
+    )
+
+
+def _approve_required_sections(project_dir):
+    """Persist explicit approval for canonical manuscript sections."""
+    checkpoint = project_dir / ".audit" / "checkpoint.json"
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "section_progress": {
+                    "Abstract": {"approval_status": "approved"},
+                    "Introduction": {"approval_status": "approved"},
+                    "Methods": {"approval_status": "approved"},
+                    "Results": {"approval_status": "approved"},
+                    "Discussion": {"approval_status": "approved"},
+                }
+            }
+        )
+    )
+
+
+def _record_asset_review(
+    project_dir,
+    asset_type: str,
+    asset_path: str,
+    caption: str,
+):
+    tracker = DataArtifactTracker(project_dir / ".audit", project_dir)
+    tracker.record_asset_review(
+        asset_type=asset_type,
+        asset_path=asset_path,
+        observations=["Observed primary grouping", "Observed displayed outcome summary"],
+        rationale="Caption aligns with the visible content and intended manuscript reference.",
+        proposed_caption=caption,
+        evidence_excerpt="verified during test",
+    )
+
+
+class TestGateResult:
+    def test_critical_failures(self):
+        result = GateResult(
+            phase=0,
+            phase_name="Test",
+            checks=[
+                GateCheck(name="a", description="", passed=True),
+                GateCheck(name="b", description="fail", passed=False, severity="CRITICAL"),
+                GateCheck(name="c", description="warn", passed=False, severity="WARNING"),
+            ],
+            passed=False,
+        )
+        assert len(result.critical_failures) == 1
+        assert len(result.warnings) == 1
+
+    def test_to_markdown(self):
+        result = GateResult(
+            phase=7,
+            phase_name="Review",
+            checks=[GateCheck(name="test", description="desc", passed=False)],
+            passed=False,
+            timestamp="2026-01-01T00:00:00",
+        )
+        md = result.to_markdown()
+        assert "❌ FAILED" in md
+        assert "Phase 7" in md
+
+
+class TestPhase0:
+    def test_fail_no_journal_profile(self, validator):
+        r = validator.validate_phase(0)
+        assert not r.passed
+
+    def test_fail_no_source_material_scan(self, validator, project_dir):
+        (project_dir / "journal-profile.yaml").write_text("type: original")
+        r = validator.validate_phase(0)
+        assert not r.passed
+        assert ".audit/source-materials.yaml" in r.missing
+
+    def test_pass_with_journal_profile(self, validator, project_dir):
+        (project_dir / "journal-profile.yaml").write_text("type: original")
+        (project_dir / ".audit" / "source-materials.yaml").write_text(
+            "schema: mdpaper.source_materials.v1\nsummary:\n  total_candidates: 0\n"
+        )
+        r = validator.validate_phase(0)
+        assert r.passed
+
+
+class TestPhase1:
+    def test_pass_with_dirs(self, validator):
+        r = validator.validate_phase(1)
+        assert r.passed  # fixture creates all dirs
+
+    def test_fail_missing_dir(self, project_dir):
+        import shutil
+
+        shutil.rmtree(project_dir / ".audit")
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_phase(1)
+        assert not r.passed
+
+
+class TestPhase2:
+    def test_fail_insufficient_refs(self, validator):
+        r = validator.validate_phase(2)
+        assert not r.passed
+        ref_check = next(c for c in r.checks if c.name == "references_count")
+        assert "0/" in ref_check.details  # "0/20 references found"
+
+    def test_pass_with_refs_default_paper_type(self, validator, project_dir):
+        """Default paper type is original-research, minimum 20 refs."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        for i in range(20):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True)
+            (ref_dir / "metadata.json").write_text(f'{{"pmid": "0000{i}"}}')
+        r = validator.validate_phase(2)
+        assert r.passed
+
+    def test_fail_below_paper_type_minimum(self, validator, project_dir):
+        """10 refs is below the 20 minimum for original-research."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        for i in range(10):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True)
+            (ref_dir / "metadata.json").write_text(f'{{"pmid": "0000{i}"}}')
+        r = validator.validate_phase(2)
+        assert not r.passed
+        ref_check = next(c for c in r.checks if c.name == "references_count")
+        assert "need 10 more" in ref_check.details
+
+    def test_case_report_lower_minimum(self, validator, project_dir):
+        """Case reports only need 8 refs (from journal-profile.yaml)."""
+        import yaml
+
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        (project_dir / "journal-profile.yaml").write_text(
+            yaml.dump({"paper": {"type": "case-report"}})
+        )
+        for i in range(8):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True)
+            (ref_dir / "metadata.json").write_text(f'{{"pmid": "0000{i}"}}')
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_phase(2)
+        assert r.passed
+
+    def test_systematic_review_higher_minimum(self, validator, project_dir):
+        """Systematic reviews need 40 refs — 20 is insufficient."""
+        import yaml
+
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        (project_dir / "journal-profile.yaml").write_text(
+            yaml.dump({"paper": {"type": "systematic-review"}})
+        )
+        for i in range(20):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True)
+            (ref_dir / "metadata.json").write_text(f'{{"pmid": "0000{i}"}}')
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_phase(2)
+        assert not r.passed
+        ref_check = next(c for c in r.checks if c.name == "references_count")
+        assert "systematic-review" in ref_check.description
+
+    def test_journal_profile_override_minimum(self, validator, project_dir):
+        """journal-profile.yaml minimum_reference_limits overrides defaults."""
+        import yaml
+
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        profile = {
+            "paper": {"type": "original-research"},
+            "references": {"minimum_reference_limits": {"original-research": 25}},
+        }
+        (project_dir / "journal-profile.yaml").write_text(yaml.dump(profile))
+        for i in range(22):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True)
+            (ref_dir / "metadata.json").write_text(f'{{"pmid": "0000{i}"}}')
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_phase(2)
+        assert not r.passed  # 22 < 25
+
+    def test_legacy_flat_md_refs_counted(self, validator, project_dir):
+        """Legacy .md refs (without metadata.json) are still counted."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        # Use letter type with low minimum (5) for easy testing
+        import yaml
+
+        (project_dir / "journal-profile.yaml").write_text(yaml.dump({"paper": {"type": "letter"}}))
+        for i in range(5):
+            (project_dir / "references" / f"ref-{i}.md").write_text(f"# Ref {i}")
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_phase(2)
+        assert r.passed
+
+
+class TestWorkflowModeShortCircuit:
+    def test_library_wiki_skips_manuscript_phase_gates(self, project_dir):
+        (project_dir / "project.json").write_text(
+            json.dumps({"slug": "test", "workflow_mode": "library-wiki"})
+        )
+
+        validator = PipelineGateValidator(project_dir)
+        result = validator.validate_phase(7)
+
+        assert result.passed
+        check = next(c for c in result.checks if c.name == "workflow_mode:library-wiki")
+        assert check.passed
+
+        phase_two = validator.validate_phase(2)
+        assert not phase_two.passed
+        ref_check = next(c for c in phase_two.checks if c.name == "references_count")
+        assert "need 20 more" in ref_check.details
+
+
+class TestPhase3And4:
+    def test_phase3_fails_without_concept_review_artifact(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=3)
+        (project_dir / "concept.md").write_text(
+            "# NOVELTY\n\nQuestion\n\n# KEY SELLING POINTS\n\n- Point A"
+        )
+
+        r = validator.validate_phase(3)
+
+        assert not r.passed
+        review_check = next(c for c in r.checks if c.name == "audit:concept-review.yaml")
+        assert not review_check.passed
+
+    def test_phase4_fails_without_complete_concept_review(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=3)
+        (project_dir / ".audit" / "concept-review.yaml").write_text(
+            "review:\n  readiness: ready\nclaims_required: []\n"
+        )
+        (project_dir / "manuscript-plan.yaml").write_text("title: draft\n")
+
+        r = validator.validate_phase(4)
+
+        assert not r.passed
+        prereq_check = next(c for c in r.checks if c.name == "prereq:audit:concept-review.yaml")
+        assert not prereq_check.passed
+
+    def test_phase4_passes_with_complete_concept_review(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=4)
+        (project_dir / "manuscript-plan.yaml").write_text("title: draft\n")
+
+        r = validator.validate_phase(4)
+
+        assert r.passed
+
+    def test_phase3_blocks_revise_readiness_without_manual_override(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=4)
+        (project_dir / ".audit" / "concept-review.yaml").write_text(
+            "metadata:\n"
+            "  generated_at: '2026-01-01T00:00:00'\n"
+            "review:\n"
+            "  readiness: revise\n"
+            "research_question:\n"
+            "  canonical_question: Does intervention X improve outcome Y?\n"
+            "claims_required:\n"
+            "  - id: claim-1\n"
+            "    text: Intervention X improves outcome Y.\n"
+            "protected_content:\n"
+            "  novelty_statement_locked:\n"
+            "    present: true\n"
+            "  selling_points_locked:\n"
+            "    present: true\n"
+        )
+
+        r = validator.validate_phase(3)
+
+        assert not r.passed
+        decision_check = next(c for c in r.checks if c.name == "concept-review-decision")
+        assert decision_check.passed is False
+        assert "manual approval required" in decision_check.details
+
+    def test_phase4_allows_manual_override_for_revise_readiness(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=4)
+        (project_dir / ".audit" / "concept-review.yaml").write_text(
+            "metadata:\n"
+            "  generated_at: '2026-01-01T00:00:00'\n"
+            "review:\n"
+            "  readiness: revise\n"
+            "research_question:\n"
+            "  canonical_question: Does intervention X improve outcome Y?\n"
+            "claims_required:\n"
+            "  - id: claim-1\n"
+            "    text: Intervention X improves outcome Y.\n"
+            "protected_content:\n"
+            "  novelty_statement_locked:\n"
+            "    present: true\n"
+            "  selling_points_locked:\n"
+            "    present: true\n"
+        )
+        (project_dir / ".audit" / "concept-review-override.yaml").write_text(
+            "approved_to_proceed: true\n"
+            "approved_by: human\n"
+            "accepted_readiness: revise\n"
+            "rationale: The concept is clinically meaningful despite weak novelty score.\n"
+            "mode: human-collaboration\n"
+        )
+        (project_dir / "manuscript-plan.yaml").write_text("title: draft\n")
+
+        r = validator.validate_phase(4)
+
+        assert r.passed
+        decision_check = next(c for c in r.checks if c.name == "concept-review-ready")
+        assert "manual override" in decision_check.details
+
+
+class TestPhase5:
+    def test_fail_no_manuscript(self, validator):
+        r = validator.validate_phase(5)
+        assert not r.passed
+
+    def test_fail_missing_sections(self, validator, project_dir):
+        (project_dir / "drafts" / "manuscript.md").write_text("# Abstract\n\n## Introduction\n")
+        r = validator.validate_phase(5)
+        assert not r.passed  # missing Methods, Results, Discussion
+
+    def test_pass_full_manuscript(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=5)
+        content = "\n".join(
+            [
+                "# Title",
+                "## Abstract",
+                "text",
+                "## Introduction",
+                "text",
+                "## Methods",
+                "text",
+                "## Results",
+                "text",
+                "## Discussion",
+                "text",
+            ]
+        )
+        (project_dir / "drafts" / "manuscript.md").write_text(content)
+        _approve_required_sections(project_dir)
+        r = validator.validate_phase(5)
+        assert r.passed
+
+    def test_fail_when_approval_checkpoint_missing(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "text",
+                    "## Results",
+                    "text",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+
+        r = validator.validate_phase(5)
+        assert not r.passed
+        approval_check = next(c for c in r.checks if c.name == "section_approval")
+        assert approval_check.passed is False
+        assert "checkpoint.json" in approval_check.details
+
+    def test_fail_when_required_sections_not_all_approved(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "text",
+                    "## Results",
+                    "text",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+        (project_dir / ".audit" / "checkpoint.json").write_text(
+            json.dumps(
+                {
+                    "section_progress": {
+                        "Abstract": {"approval_status": "approved"},
+                        "Introduction": {"approval_status": "approved"},
+                        "Methods": {"approval_status": "approved"},
+                        "Results": {"approval_status": "pending"},
+                    }
+                }
+            )
+        )
+
+        r = validator.validate_phase(5)
+        assert not r.passed
+        approval_check = next(c for c in r.checks if c.name == "section_approval")
+        assert approval_check.passed is False
+        assert "Results" in approval_check.details or "Discussion" in approval_check.details
+
+    def test_fail_required_planned_asset_missing_from_manifest(self, validator, project_dir):
+        import yaml
+
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "manuscript-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "asset_plan": [
+                        {
+                            "id": "fig-1",
+                            "type": "flow_diagram",
+                            "section": "Methods",
+                            "caption": "Study flow diagram",
+                        }
+                    ]
+                }
+            )
+        )
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "See Figure 1.",
+                    "## Results",
+                    "text",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+
+        r = validator.validate_phase(5)
+        assert not r.passed
+        failed = next(c for c in r.checks if c.name == "asset-plan:fig-1:registered")
+        assert failed.passed is False
+
+    def test_fail_required_planned_figure_without_exportable_asset(self, validator, project_dir):
+        import yaml
+
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "results" / "figures").mkdir(parents=True)
+        (project_dir / "results" / "figures" / "study-flow.drawio").write_text("xml")
+        (project_dir / "results" / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "figures": [
+                        {
+                            "number": 1,
+                            "filename": "study-flow.drawio",
+                            "caption": "Study flow diagram",
+                        }
+                    ]
+                }
+            )
+        )
+        (project_dir / "manuscript-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "asset_plan": [
+                        {
+                            "id": "fig-1",
+                            "type": "flow_diagram",
+                            "section": "Methods",
+                            "caption": "Study flow diagram",
+                        }
+                    ]
+                }
+            )
+        )
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "![Figure 1. Study flow diagram](../results/figures/study-flow.drawio)",
+                    "**Figure 1.** Study flow diagram",
+                    "See Figure 1.",
+                    "## Results",
+                    "text",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+
+        r = validator.validate_phase(5)
+        assert not r.passed
+        failed = next(c for c in r.checks if c.name == "asset-plan:fig-1:exportable")
+        assert failed.passed is False
+
+    def test_pass_required_planned_assets_when_registered_and_placed(self, validator, project_dir):
+        import yaml
+
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "results" / "figures").mkdir(parents=True)
+        (project_dir / "results" / "tables").mkdir(parents=True)
+        (project_dir / "results" / "figures" / "study-flow.drawio").write_text("xml")
+        (project_dir / "results" / "figures" / "study-flow.png").write_bytes(b"png")
+        (project_dir / "results" / "tables" / "baseline.md").write_text("| a | b |")
+        (project_dir / ".audit" / "data-artifacts.yaml").write_text(
+            yaml.dump(
+                {
+                    "artifacts": [
+                        {"id": "fig-1", "kind": "figure"},
+                        {"id": "table-1", "kind": "table"},
+                    ]
+                }
+            )
+        )
+        (project_dir / "results" / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "figures": [
+                        {
+                            "number": 1,
+                            "filename": "study-flow.drawio",
+                            "caption": "Study flow diagram",
+                        }
+                    ],
+                    "tables": [
+                        {
+                            "number": 1,
+                            "filename": "baseline.md",
+                            "caption": "Baseline characteristics of study participants",
+                        }
+                    ],
+                }
+            )
+        )
+        (project_dir / "manuscript-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "asset_plan": [
+                        {
+                            "id": "fig-1",
+                            "type": "flow_diagram",
+                            "section": "Methods",
+                            "caption": "Study flow diagram",
+                        },
+                        {
+                            "id": "table-1",
+                            "type": "table_one",
+                            "section": "Results",
+                            "caption": "Baseline characteristics of study participants",
+                        },
+                    ]
+                }
+            )
+        )
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "![Figure 1. Study flow diagram](../results/figures/study-flow.png)",
+                    "**Figure 1.** Study flow diagram",
+                    "See Figure 1.",
+                    "## Results",
+                    "**Table 1.** Baseline characteristics of study participants",
+                    "See Table 1 for baseline characteristics.",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+        _record_asset_review(
+            project_dir,
+            "figure",
+            "results/figures/study-flow.drawio",
+            "Study flow diagram",
+        )
+        _record_asset_review(
+            project_dir,
+            "table",
+            "results/tables/baseline.md",
+            "Baseline characteristics of study participants",
+        )
+        _approve_required_sections(project_dir)
+
+        r = validator.validate_phase(5)
+        assert r.passed
+
+    def test_fail_planned_asset_without_review_receipt(self, validator, project_dir):
+        import yaml
+
+        _add_prerequisites(project_dir, up_to_phase=5)
+        (project_dir / "results" / "figures").mkdir(parents=True)
+        (project_dir / "results" / "figures" / "forest.png").write_bytes(b"png")
+        (project_dir / ".audit" / "data-artifacts.yaml").write_text(
+            yaml.dump(
+                {
+                    "artifacts": [
+                        {
+                            "id": "DA-001",
+                            "artifact_type": "figure",
+                            "output_path": "results/figures/forest.png",
+                            "provenance_code": "print('x')",
+                        }
+                    ]
+                }
+            )
+        )
+        (project_dir / "results" / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "figures": [
+                        {
+                            "number": 1,
+                            "filename": "forest.png",
+                            "caption": "Forest plot of primary outcome",
+                        }
+                    ],
+                    "tables": [],
+                }
+            )
+        )
+        (project_dir / "manuscript-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "asset_plan": [
+                        {
+                            "id": "fig-forest",
+                            "type": "custom_figure",
+                            "section": "Results",
+                            "caption": "Forest plot of primary outcome",
+                        }
+                    ]
+                }
+            )
+        )
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "\n".join(
+                [
+                    "# Title",
+                    "## Abstract",
+                    "text",
+                    "## Introduction",
+                    "text",
+                    "## Methods",
+                    "text",
+                    "## Results",
+                    "**Figure 1.** Forest plot of primary outcome",
+                    "See Figure 1.",
+                    "## Discussion",
+                    "text",
+                ]
+            )
+        )
+        _approve_required_sections(project_dir)
+
+        r = validator.validate_phase(5)
+        assert not r.passed
+        review_check = next(c for c in r.checks if c.name == "asset-plan:fig-forest:reviewed")
+        assert review_check.passed is False
+        assert "review" in review_check.details
+
+
+class TestPhase7:
+    """Phase 7 is the most critical gate — tests the review loop enforcement."""
+
+    def test_fail_no_review_artifacts(self, validator):
+        """Without any review artifacts, Phase 7 must FAIL."""
+        r = validator.validate_phase(7)
+        assert not r.passed
+        names = [c.name for c in r.critical_failures]
+        assert "audit-loop:state" in names
+        assert "review:rounds_completed" in names
+
+    def test_fail_partial_round(self, validator, project_dir):
+        """Even with loop state but missing artifacts, must FAIL."""
+        audit = project_dir / ".audit"
+        state = {
+            "config": {"max_rounds": 3},
+            "rounds": [{"round": 1, "verdict": "continue"}],
+        }
+        (audit / "audit-loop-review.json").write_text(json.dumps(state))
+        # Missing review-report-1.md, author-response-1.md, equator
+        r = validator.validate_phase(7)
+        assert not r.passed
+        names = [c.name for c in r.critical_failures]
+        assert "review:review-report-1.md" in names
+        assert "review:author-response-1.md" in names
+
+    def test_pass_complete_review(self, validator, project_dir):
+        """Full review loop with all artifacts should PASS."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        audit = project_dir / ".audit"
+        state = {
+            "config": {"max_rounds": 3},
+            "rounds": [
+                {"round": 1, "verdict": "continue"},
+                {"round": 2, "verdict": "quality_met"},
+            ],
+        }
+        (audit / "audit-loop-review.json").write_text(json.dumps(state))
+        for i in [1, 2]:
+            (audit / f"review-report-{i}.md").write_text(f"# Round {i}")
+            (audit / f"author-response-{i}.md").write_text(f"# Response {i}")
+            (audit / f"equator-compliance-{i}.md").write_text(f"# EQUATOR {i}")
+
+        # evolution-log with review_round events
+        entries = [
+            json.dumps({"event": "review_round", "round": 1}),
+            json.dumps({"event": "review_round", "round": 2}),
+        ]
+        (audit / "evolution-log.jsonl").write_text("\n".join(entries) + "\n")
+
+        r = validator.validate_phase(7)
+        assert r.passed
+
+
+class TestPhase65:
+    def test_fail_no_baseline(self, validator, project_dir):
+        r = validator.validate_phase(65)
+        assert not r.passed
+
+    def test_pass_with_baseline(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=65)
+        audit = project_dir / ".audit"
+        entries = [json.dumps({"event": "baseline", "round": 0})]
+        (audit / "evolution-log.jsonl").write_text("\n".join(entries) + "\n")
+        (audit / "quality-scorecard.md").write_text("# Scorecard")
+        r = validator.validate_phase(65)
+        assert r.passed
+
+
+class TestPhase11:
+    def test_skips_git_checks_when_prerequisites_fail(self, validator, project_dir, monkeypatch):
+        """Final gate should not run Git subprocesses while earlier gates still fail."""
+        import subprocess
+
+        (project_dir / ".git").mkdir()
+
+        def fail_run(*args, **kwargs):
+            raise AssertionError("git subprocess should not run")
+
+        monkeypatch.setattr(subprocess, "run", fail_run)
+
+        r = validator.validate_phase(11)
+        names = [c.name for c in r.checks]
+        assert not r.passed
+        assert "git:skipped" in names
+        assert "git:clean" not in names
+
+    def test_phase11_reuses_single_status_call_for_clean_and_push(
+        self, validator, project_dir, monkeypatch
+    ):
+        """Phase 11 should avoid multiple slow git status calls."""
+        import subprocess
+
+        _add_prerequisites(project_dir, up_to_phase=11)
+        (project_dir / ".git").mkdir()
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if cmd[1] == "status":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="# branch.upstream origin/master\n# branch.ab +0 -0\n",
+                    stderr="",
+                )
+            if cmd[1] == "log":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="abc123 release paper\ndrafts/manuscript.md\n",
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        r = validator.validate_phase(11)
+        names = [c.name for c in r.checks]
+        status_calls = [cmd for cmd, _ in calls if cmd[1] == "status"]
+        assert "git:clean" in names
+        assert "git:pushed" in names
+        assert len(status_calls) == 1
+        assert all(kwargs["timeout"] == 3 for _, kwargs in calls)
+        assert all(kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0" for _, kwargs in calls)
+
+    def test_phase11_detects_behind_upstream(self, validator, project_dir, monkeypatch):
+        """`+0 -N` means local is behind upstream and must not be reported as synced."""
+        import subprocess
+
+        _add_prerequisites(project_dir, up_to_phase=11)
+        _write_minimal_docx(project_dir / "exports" / "paper.docx")
+        _write_minimal_pdf(project_dir / "exports" / "paper.pdf")
+        (project_dir / ".git").mkdir()
+
+        def fake_run(cmd, **kwargs):
+            if cmd[1] == "status":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="# branch.upstream origin/master\n# branch.ab +0 -3\n",
+                    stderr="",
+                )
+            if cmd[1] == "log":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="abc123 release paper\ndrafts/manuscript.md\n",
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        r = validator.validate_phase(11)
+        pushed_check = next(c for c in r.checks if c.name == "git:pushed")
+        assert not pushed_check.passed
+        assert "behind" in pushed_check.details
+
+    def test_phase11_allows_missing_upstream(self, validator, project_dir, monkeypatch):
+        """Paper-only workflows often have no remote; that should not block delivery."""
+        import subprocess
+
+        _add_prerequisites(project_dir, up_to_phase=11)
+        (project_dir / ".git").mkdir()
+
+        def fake_run(cmd, **kwargs):
+            if cmd[1] == "status":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="# branch.oid abc123\n# branch.head main\n",
+                    stderr="",
+                )
+            if cmd[1] == "log":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="abc123 release paper\ndrafts/manuscript.md\n",
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        r = validator.validate_phase(11)
+        pushed_check = next(c for c in r.checks if c.name == "git:pushed")
+        assert r.passed
+        assert pushed_check.passed
+        assert pushed_check.severity == "INFO"
+        assert "optional" in pushed_check.details
+
+    def test_phase11_missing_git_is_advisory(self, validator, project_dir):
+        """A manuscript export should not require the user to use Git at all."""
+        _add_prerequisites(project_dir, up_to_phase=11)
+
+        r = validator.validate_phase(11)
+        repository_check = next(c for c in r.checks if c.name == "git:repository")
+        assert r.passed
+        assert not repository_check.passed
+        assert repository_check.severity == "WARNING"
+        assert "optional" in repository_check.details
+
+    def test_phase11_git_timeout_returns_warning(self, validator, project_dir, monkeypatch):
+        """A slow Git command should warn instead of hanging or blocking paper delivery."""
+        import subprocess
+
+        _add_prerequisites(project_dir, up_to_phase=11)
+        (project_dir / ".git").mkdir()
+
+        def slow_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(subprocess, "run", slow_run)
+
+        r = validator.validate_phase(11)
+        error_check = next(c for c in r.checks if c.name == "git:error")
+        assert r.passed
+        assert not error_check.passed
+        assert error_check.severity == "WARNING"
+        assert "timed out" in error_check.details
+
+
+class TestPhase21SourceMaterials:
+    def test_pending_primary_source_material_blocks_phase21(self, validator, project_dir):
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        for i in range(20):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            (ref_dir / "metadata.json").write_text(
+                json.dumps({"pmid": f"0000{i}", "analysis_completed": True})
+            )
+        (project_dir / "references" / "fulltext-ingestion-status.md").write_text("ok")
+        (project_dir / ".audit" / "source-materials.yaml").write_text(
+            yaml.dump(
+                {
+                    "schema": "mdpaper.source_materials.v1",
+                    "materials": [
+                        {
+                            "id": "source-001",
+                            "relative_path": "table.docx",
+                            "evidence_priority": "primary_user_material",
+                            "ingestion": {
+                                "status": "pending_asset_aware",
+                                "required": True,
+                            },
+                        }
+                    ],
+                }
+            )
+        )
+
+        r = validator.validate_phase(21)
+
+        assert not r.passed
+        assert "source-materials:asset-aware" in r.missing
+
+    def test_ingested_primary_source_material_passes_phase21(self, validator, project_dir):
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        for i in range(20):
+            ref_dir = project_dir / "references" / f"ref-{i}"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            (ref_dir / "metadata.json").write_text(
+                json.dumps({"pmid": f"0000{i}", "analysis_completed": True})
+            )
+        (project_dir / "references" / "fulltext-ingestion-status.md").write_text("ok")
+        (project_dir / ".audit" / "source-materials.yaml").write_text(
+            yaml.dump(
+                {
+                    "schema": "mdpaper.source_materials.v1",
+                    "materials": [
+                        {
+                            "id": "source-001",
+                            "relative_path": "table.docx",
+                            "evidence_priority": "primary_user_material",
+                            "ingestion": {
+                                "status": "ingested_asset_aware",
+                                "asset_aware_doc_id": "doc_123",
+                                "required": False,
+                            },
+                        }
+                    ],
+                }
+            )
+        )
+
+        r = validator.validate_phase(21)
+
+        assert r.passed
+
+
+class TestPhase21Ordering:
+    def test_phase21_prerequisites_do_not_require_later_phase_artifacts(
+        self, validator, project_dir
+    ):
+        """Phase 2.1 is encoded as 21 but must not inherit Phase 7/9 prerequisites."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        refs = project_dir / "references"
+        for i in range(20):
+            ref_dir = refs / f"ref-{i}"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            (ref_dir / "metadata.json").write_text(
+                json.dumps({"pmid": f"0000{i}", "analysis_completed": True})
+            )
+
+        r = validator.validate_phase(21)
+        names = {c.name for c in r.checks}
+        assert "prereq:references" in names
+        assert "prereq:concept.md" not in names
+        assert "prereq:manuscript.md" not in names
+        assert "prereq:quality-scorecard" not in names
+        assert "prereq:review_completed" not in names
+
+
+class TestHeartbeat:
+    def test_heartbeat_returns_status(self, validator):
+        status = validator.get_pipeline_status()
+        assert "completion_pct" in status
+        assert "phases" in status
+        assert len(status["phases"]) == 14
+
+    def test_heartbeat_reflects_progress(self, validator, project_dir):
+        # Add Phase 0 artifacts → Phase 0 passes
+        (project_dir / "journal-profile.yaml").write_text("type: original")
+        (project_dir / ".audit" / "source-materials.yaml").write_text(
+            "schema: mdpaper.source_materials.v1\nsummary:\n  total_candidates: 0\n"
+        )
+        status = validator.get_pipeline_status()
+        phase_0 = [p for p in status["phases"] if p["phase"] == 0][0]
+        assert phase_0["passed"] is True
+
+    def test_heartbeat_does_not_call_full_gate_validation(self, validator, monkeypatch):
+        """Heartbeat must stay lightweight and avoid validate_phase side effects."""
+
+        def fail_validate_phase(phase):
+            raise AssertionError(f"validate_phase({phase}) should not run in heartbeat")
+
+        monkeypatch.setattr(validator, "validate_phase", fail_validate_phase)
+        status = validator.get_pipeline_status()
+        assert status["phases_total"] == 14
+
+    def test_heartbeat_does_not_write_gate_validation_log(self, validator, project_dir):
+        """Heartbeat should not append hard-gate audit entries."""
+        validator.get_pipeline_status()
+        assert not (project_dir / ".audit" / "gate-validations.jsonl").exists()
+
+    def test_heartbeat_omits_git_subprocesses(self, validator, project_dir, monkeypatch):
+        """Heartbeat must not run Git even when Phase 11 artifacts are present."""
+        import subprocess
+
+        _add_prerequisites(project_dir, up_to_phase=11)
+        (project_dir / ".git").mkdir()
+
+        def fail_run(*args, **kwargs):
+            raise AssertionError("git subprocess should not run in heartbeat")
+
+        monkeypatch.setattr(subprocess, "run", fail_run)
+        status = validator.get_pipeline_status()
+        phase_11 = next(p for p in status["phases"] if p["phase"] == 11)
+        assert phase_11["name"] == "Final Delivery"
+
+
+class TestAgentActionableGateErrors:
+    def test_phase10_pipeline_run_reports_wrong_name_candidates(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=10)
+        (project_dir / ".audit" / "pipeline-run.md").write_text("# Run\n")
+
+        r = validator.validate_phase(10)
+        check = next(c for c in r.checks if c.name == "pipeline-run.md")
+        assert not check.passed
+        assert check.expected_pattern == "pipeline-run-*.md"
+        assert check.search_path == ".audit/pipeline-run-*.md"
+        assert ".audit/pipeline-run.md" in check.actual_found
+        assert "pipeline-run-YYYYMMDD-HHmm.md" in check.fix_hint
+
+    def test_phase10_d7_d8_reports_expected_heading_pattern(self, validator, project_dir):
+        _add_prerequisites(project_dir, up_to_phase=10)
+        (project_dir / ".audit" / "pipeline-run-20260101-1200.md").write_text(
+            "# Run\n## D7 Review Retrospective\n## D8 Retrospective\n"
+        )
+
+        r = validator.validate_phase(10)
+        d7 = next(c for c in r.checks if c.name == "pipeline-run:D7")
+        d8 = next(c for c in r.checks if c.name == "pipeline-run:D8")
+        assert not d7.passed
+        assert not d8.passed
+        assert d7.expected_pattern.startswith("^##\\s+D7")
+        assert d7.actual_found == ["## D7 Review Retrospective"]
+        assert "## D7 retrospective:" in d7.fix_hint
+        assert d8.actual_found == ["## D8 Retrospective"]
+
+    def test_gate_result_json_compact_returns_failing_metadata(self):
+        result = GateResult(
+            phase=10,
+            phase_name="Retrospective",
+            checks=[
+                GateCheck(name="ok", description="ok", passed=True),
+                GateCheck(
+                    name="pipeline-run:D7",
+                    description="D7 section",
+                    passed=False,
+                    expected_pattern="^##\\s+D7",
+                    search_path=".audit/pipeline-run-*.md",
+                    actual_found=["## D7 Review"],
+                    fix_hint="Rename heading",
+                ),
+            ],
+            passed=False,
+            timestamp="2026-01-01T00:00:00",
+        )
+        data = json.loads(result.to_json(compact=True))
+        assert data["schema"] == "mdpaper.gate_result.v1"
+        assert [c["name"] for c in data["checks"]] == ["pipeline-run:D7"]
+        assert data["checks"][0]["expected_pattern"] == "^##\\s+D7"
+
+
+class TestGateLogging:
+    def test_gate_validation_logged(self, validator, project_dir):
+        validator.validate_phase(0)
+        log_file = project_dir / ".audit" / "gate-validations.jsonl"
+        assert log_file.is_file()
+        entry = json.loads(log_file.read_text().strip().split("\n")[0])
+        assert entry["phase"] == 0
+        assert "passed" in entry
+
+
+class TestProjectStructure:
+    """Tests for validate_project_structure — independent of pipeline."""
+
+    def test_empty_project_reports_missing(self, project_dir):
+        """Bare project dir should fail on project.json and concept."""
+        # Remove the dirs that the fixture auto-creates
+        import shutil
+
+        from med_paper_assistant.infrastructure.persistence.pipeline_gate_validator import (
+            PipelineGateValidator,
+        )
+
+        for d in project_dir.iterdir():
+            if d.is_dir():
+                shutil.rmtree(d)
+        v = PipelineGateValidator(project_dir)
+        r = v.validate_project_structure()
+        assert r.phase == -1
+        assert r.phase_name == "Project Structure"
+        # project.json missing → CRITICAL → overall fail
+        pj_check = next(c for c in r.checks if c.name == "project.json")
+        assert not pj_check.passed
+
+    def test_complete_project_passes(self, validator, project_dir):
+        """Project with all required dirs + project.json passes."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        (project_dir / "concept.md").write_text("# Concept")
+        (project_dir / ".memory" / "activeContext.md").write_text("# Active")
+        (project_dir / ".memory" / "progress.md").write_text("# Progress")
+        r = validator.validate_project_structure()
+        assert r.passed
+
+    def test_concept_in_drafts_accepted(self, validator, project_dir):
+        """concept.md in drafts/ should also pass."""
+        (project_dir / "project.json").write_text('{"slug": "test"}')
+        (project_dir / "drafts" / "concept.md").write_text("# Concept")
+        r = validator.validate_project_structure()
+        concept_check = next(c for c in r.checks if c.name == "concept.md")
+        assert concept_check.passed
+
+
+class TestPrerequisiteChecks:
+    """Tests for _check_prerequisites prepended in validate_phase for phase > 1."""
+
+    def test_phase_1_no_prereqs(self, validator, project_dir):
+        """Phase 1 should NOT have prerequisite checks."""
+        r = validator.validate_phase(1)
+        prereq_checks = [c for c in r.checks if c.name.startswith("prereq:")]
+        assert len(prereq_checks) == 0
+
+    def test_phase_2_has_project_json_prereq(self, validator, project_dir):
+        """Phase 2 should prepend prereq:project.json check."""
+        r = validator.validate_phase(2)
+        prereq_checks = [c for c in r.checks if c.name.startswith("prereq:")]
+        assert len(prereq_checks) == 1
+        assert prereq_checks[0].name == "prereq:project.json"
+        assert prereq_checks[0].severity == "CRITICAL"
+
+    def test_phase_5_has_concept_prereq(self, validator, project_dir):
+        """Phase 5 should check concept.md prerequisite."""
+        r = validator.validate_phase(5)
+        prereq_names = [c.name for c in r.checks if c.name.startswith("prereq:")]
+        assert "prereq:project.json" in prereq_names
+        assert "prereq:references" in prereq_names
+        assert "prereq:concept.md" in prereq_names
+
+    def test_phase_7_has_manuscript_prereq(self, validator, project_dir):
+        """Phase 7 should check manuscript.md prerequisite."""
+        r = validator.validate_phase(7)
+        prereq_names = [c.name for c in r.checks if c.name.startswith("prereq:")]
+        assert "prereq:manuscript.md" in prereq_names
+
+    def test_prereqs_are_critical_blocking(self, validator, project_dir):
+        """Prerequisite failures should be CRITICAL — blocking phase progression."""
+        r = validator.validate_phase(5)
+        prereq_fails = [c for c in r.checks if c.name.startswith("prereq:") and not c.passed]
+        assert len(prereq_fails) > 0
+        for c in prereq_fails:
+            assert c.severity == "CRITICAL"
+
+
+class TestReviewPrerequisite:
+    """Tests for the Phase 7 review completion prerequisite enforced on phases 8+."""
+
+    def test_phase_8_requires_review_completed(self, validator, project_dir):
+        """Phase 8+ gate should check prereq:review_completed."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        r = validator.validate_phase(8)
+        prereq_names = [c.name for c in r.checks]
+        assert "prereq:review_completed" in prereq_names
+
+    def test_phase_8_fails_without_review_loop(self, validator, project_dir):
+        """Phase 8 should fail when audit-loop-review.json doesn't exist."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        r = validator.validate_phase(8)
+        review_check = next(c for c in r.checks if c.name == "prereq:review_completed")
+        assert not review_check.passed
+        assert "start_review_round" in review_check.details
+
+    def test_phase_8_fails_with_insufficient_rounds(self, validator, project_dir):
+        """Phase 8 should fail when fewer than min_rounds completed."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        loop_state = project_dir / ".audit" / "audit-loop-review.json"
+        loop_state.write_text(
+            json.dumps(
+                {
+                    "config": {"min_rounds": 2, "max_rounds": 3},
+                    "rounds": [{"round": 1, "verdict": "needs_revision"}],
+                }
+            )
+        )
+        r = validator.validate_phase(8)
+        review_check = next(c for c in r.checks if c.name == "prereq:review_completed")
+        assert not review_check.passed
+        assert "1/2" in review_check.details
+
+    def test_phase_8_passes_with_completed_review(self, validator, project_dir):
+        """Phase 8 should pass when review loop is properly completed."""
+        _add_prerequisites(project_dir, up_to_phase=8)
+        r = validator.validate_phase(8)
+        review_check = next(c for c in r.checks if c.name == "prereq:review_completed")
+        assert review_check.passed
+
+    def test_phase_8_fails_with_unresolved_citation(self, validator, project_dir):
+        """A References heading alone is not enough for Phase 8 reference sync."""
+        _add_prerequisites(project_dir, up_to_phase=8)
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            "# Manuscript\n\nClaim with [[missing2026_99999999]].\n\n## References\n\n"
+        )
+
+        r = validator.validate_phase(8)
+
+        assert not r.passed
+        assert any(c.name == "reference-sync:wikilinks" for c in r.critical_failures)
+
+    def test_phase_8_resolves_legacy_flat_md_reference_files(self, validator, project_dir):
+        """Legacy flat references/key.md files should resolve manuscript wikilinks."""
+        _add_prerequisites(project_dir, up_to_phase=8)
+        key = "smith2026_12345678"
+        (project_dir / "references" / f"{key}.md").write_text("# Smith 2026\n")
+        (project_dir / "drafts" / "manuscript.md").write_text(
+            f"# Manuscript\n\nClaim with [[{key}]].\n\n## References\n\n"
+        )
+
+        r = validator.validate_phase(8)
+
+        c5 = next(c for c in r.checks if c.name == "reference-sync:wikilinks")
+        assert c5.passed
+
+    def test_phase_9_also_requires_review(self, validator, project_dir):
+        """Phase 9 (Export) should also require review completion."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        r = validator.validate_phase(9)
+        prereq_names = [c.name for c in r.checks]
+        assert "prereq:review_completed" in prereq_names
+
+    def test_phase_9_fails_with_corrupt_export_files(self, validator, project_dir):
+        """Phase 9 must prove export integrity, not just file extensions."""
+        _add_prerequisites(project_dir, up_to_phase=9)
+        exports = project_dir / "exports"
+        (exports / "paper.docx").write_bytes(b"PK")
+        (exports / "paper.pdf").write_bytes(b"%PDF")
+
+        r = validator.validate_phase(9)
+
+        assert not r.passed
+        names = {c.name for c in r.critical_failures}
+        assert "export:docx:integrity" in names
+        assert "export:pdf:integrity" in names
+
+    def test_phase_65_does_not_require_review(self, validator, project_dir):
+        """Phase 65 (Evolution Gate) sits before Phase 7 — should NOT check review."""
+        _add_prerequisites(project_dir, up_to_phase=6)
+        r = validator.validate_phase(65)
+        prereq_names = [c.name for c in r.checks]
+        assert "prereq:review_completed" not in prereq_names
+
+    def test_review_fails_with_invalid_verdict(self, validator, project_dir):
+        """Review should fail when loop didn't terminate properly."""
+        _add_prerequisites(project_dir, up_to_phase=7)
+        loop_state = project_dir / ".audit" / "audit-loop-review.json"
+        loop_state.write_text(
+            json.dumps(
+                {
+                    "config": {"min_rounds": 2, "max_rounds": 3},
+                    "rounds": [
+                        {"round": 1, "verdict": "needs_revision"},
+                        {"round": 2, "verdict": "in_progress"},
+                    ],
+                }
+            )
+        )
+        r = validator.validate_phase(8)
+        review_check = next(c for c in r.checks if c.name == "prereq:review_completed")
+        assert not review_check.passed
+        assert "not properly terminated" in review_check.details
+
+
+class TestCheckReviewCompleted:
+    """Direct tests for _check_review_completed helper."""
+
+    def test_missing_audit_loop_file(self, validator, project_dir):
+        """Should fail with guidance when file doesn't exist."""
+        passed, details = validator._check_review_completed()
+        assert not passed
+        assert "start_review_round" in details
+
+    def test_corrupt_json(self, validator, project_dir):
+        """Should fail gracefully on corrupt JSON."""
+        (project_dir / ".audit" / "audit-loop-review.json").write_text("{not valid")
+        passed, details = validator._check_review_completed()
+        assert not passed
+        assert "corrupt" in details
+
+    def test_quality_met_verdict(self, validator, project_dir):
+        """Should pass with quality_met verdict."""
+        (project_dir / ".audit" / "audit-loop-review.json").write_text(
+            json.dumps(
+                {
+                    "config": {"min_rounds": 2, "max_rounds": 3},
+                    "rounds": [
+                        {"round": 1, "verdict": "needs_revision"},
+                        {"round": 2, "verdict": "quality_met"},
+                    ],
+                }
+            )
+        )
+        _write_review_artifacts(project_dir, rounds=2)
+        passed, details = validator._check_review_completed()
+        assert passed
+        assert "quality_met" in details
+
+    def test_max_rounds_verdict(self, validator, project_dir):
+        """Should pass with max_rounds verdict (reviewed enough times)."""
+        (project_dir / ".audit" / "audit-loop-review.json").write_text(
+            json.dumps(
+                {
+                    "config": {"min_rounds": 2, "max_rounds": 3},
+                    "rounds": [
+                        {"round": 1, "verdict": "needs_revision"},
+                        {"round": 2, "verdict": "needs_revision"},
+                        {"round": 3, "verdict": "max_rounds"},
+                    ],
+                }
+            )
+        )
+        _write_review_artifacts(project_dir, rounds=3)
+        passed, details = validator._check_review_completed()
+        assert passed
+
+    def test_rewrite_needed_verdict_does_not_complete_review(self, validator, project_dir):
+        """rewrite_needed must regress to Phase 5, not unlock Phase 8."""
+        (project_dir / ".audit" / "audit-loop-review.json").write_text(
+            json.dumps(
+                {
+                    "config": {"min_rounds": 1, "max_rounds": 3},
+                    "rounds": [{"round": 1, "verdict": "rewrite_needed"}],
+                }
+            )
+        )
+        passed, details = validator._check_review_completed()
+        assert not passed
+        assert "not properly terminated" in details

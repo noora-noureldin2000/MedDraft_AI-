@@ -1,0 +1,42 @@
+# ==============================================================================
+# MedDraft_AI — Python Dependencies
+# ==============================================================================
+
+# --- Core Framework, CLI & Utilities ---
+click>=8.0.0
+rich>=13.0.0
+pyyaml>=6.0
+requests>=2.31.0
+httpx>=0.25.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+tenacity>=8.2.0
+tqdm>=4.66.0
+
+# --- LLM Provider SDKs (Both Paths) ---
+openai>=1.0.0
+anthropic>=0.18.0
+langchain-core>=0.1.0
+ollama>=0.1.0
+
+# --- PDF Reading, Extraction & OCR ---
+docling>=2.0.0
+docling-core>=2.0.0
+pypdf>=3.15.0
+pdfplumber>=0.10.0
+Pillow>=10.0.0
+
+# --- Academic Literature Search & Bibliographics ---
+scholarly>=1.7.0
+habanero>=1.2.3
+rispy>=0.7.1
+bibtexparser>=1.4.0
+beautifulsoup4>=4.12.0
+
+# --- Document Export & Formatting ---
+python-docx>=1.1.0
+lxml>=4.9.0
+defusedxml>=0.7.1
+
+# --- Testing ---
+pytest>=7.4.0

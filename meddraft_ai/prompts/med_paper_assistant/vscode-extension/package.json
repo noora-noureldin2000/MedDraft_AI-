@@ -1,0 +1,234 @@
+{
+  "name": "medpaper-assistant",
+  "displayName": "MedPaper Assistant",
+  "description": "Compact-first MCP research workspace with source-material intake for manuscript and library-wiki workflows in VS Code",
+  "version": "0.7.11",
+  "publisher": "u9401066",
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#0B1F35",
+    "theme": "dark"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/u9401066/med-paper-assistant"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "AI",
+    "Data Science",
+    "Education"
+  ],
+  "keywords": [
+    "medical",
+    "paper",
+    "writing",
+    "pubmed",
+    "research",
+    "source-materials",
+    "asset-aware",
+    "mcp",
+    "copilot"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "mdpaper",
+        "label": "MedPaper Assistant MCP Server"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "medpaper.assistant",
+        "name": "mdpaper",
+        "fullName": "MedPaper Assistant",
+        "description": "協助文獻探索、LLM wiki 整理、研究概念驗證、稿件撰寫與匯出",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "search",
+            "description": "搜尋 PubMed 與延伸研究"
+          },
+          {
+            "name": "draft",
+            "description": "撰寫與修訂論文章節"
+          },
+          {
+            "name": "concept",
+            "description": "發展並驗證研究概念"
+          },
+          {
+            "name": "project",
+            "description": "管理 manuscript / library-wiki 專案"
+          },
+          {
+            "name": "format",
+            "description": "匯出 Word 與投稿文件"
+          },
+          {
+            "name": "autopaper",
+            "description": "全自動寫論文（13 main gate checkpoints + Phase 2.1 sub-gate + 79 Hooks）"
+          },
+          {
+            "name": "drawio",
+            "description": "📐 Draw.io 圖表與流程圖（Webview + MCP）"
+          },
+          {
+            "name": "analysis",
+            "description": "資料分析、Table 1 與圖表"
+          },
+          {
+            "name": "strategy",
+            "description": "搜尋策略與工作流設定"
+          },
+          {
+            "name": "help",
+            "description": "顯示 @mdpaper 指令與工作流"
+          }
+        ],
+        "disambiguation": [
+          {
+            "category": "medical-paper-writing",
+            "description": "User wants help with medical paper writing, literature review, or research concept development",
+            "examples": [
+              "幫我找 remimazolam 相關論文",
+              "寫一篇關於 ECMO 的 introduction",
+              "驗證我的研究 novelty",
+              "搜尋 PubMed",
+              "全自動寫論文",
+              "一鍵寫論文",
+              "Help me respond to reviewer comments"
+            ]
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "mdpaper.startServer",
+        "title": "Start MedPaper MCP Server",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.stopServer",
+        "title": "Stop MedPaper MCP Server",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showStatus",
+        "title": "Show MedPaper Status",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.autoPaper",
+        "title": "Auto Paper - 全自動寫論文",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.setupWorkspace",
+        "title": "Setup Workspace - 設定 Skills/Prompts/Docs/Instructions/Templates",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.openLlmWikiGuide",
+        "title": "Open LLM Wiki Guide - 開啟 LLM Wiki 使用指南",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showGraphDefault",
+        "title": "Show Foam Graph: Default",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showGraphEvidence",
+        "title": "Show Foam Graph: Evidence",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showGraphWriting",
+        "title": "Show Foam Graph: Writing",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showGraphAssets",
+        "title": "Show Foam Graph: Assets",
+        "category": "MedPaper"
+      },
+      {
+        "command": "mdpaper.showGraphReview",
+        "title": "Show Foam Graph: Review",
+        "category": "MedPaper"
+      }
+    ],
+    "configuration": {
+      "title": "MedPaper Assistant",
+      "properties": {
+        "mdpaper.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Python executable. Leave empty to use bundled Python or system default."
+        },
+        "mdpaper.projectsDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Default directory for research projects. Leave empty to use workspace."
+        },
+        "mdpaper.toolSurface": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "default": "compact",
+          "description": "MedPaper MCP tool surface. Use full to expose advanced wiki/reference orchestration tools such as import_local_papers, ingest_web_source, ingest_markdown_source, resolve_reference_identity, and materialize_agent_wiki."
+        },
+        "mdpaper.defaultCitationStyle": {
+          "type": "string",
+          "enum": [
+            "vancouver",
+            "apa",
+            "harvard",
+            "chicago"
+          ],
+          "default": "vancouver",
+          "description": "Default citation style for references."
+        }
+      }
+    }
+  },
+  "extensionDependencies": [],
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "bundle:check": "node ./scripts/bundle-assets.cjs check",
+    "bundle:sync": "node ./scripts/bundle-assets.cjs sync",
+    "bundle:sync-python": "node ./scripts/bundle-assets.cjs sync-python",
+    "sync-assets:check": "npm run bundle:check",
+    "pretest": "npm run compile",
+    "test": "vitest run",
+    "test:ci": "npm run compile && vitest run",
+    "test:install-smoke": "node ./scripts/install-smoke.cjs",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext ts",
+    "validate": "node ./scripts/run-validate-build.cjs",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.18"
+  }
+}
