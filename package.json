@@ -7,7 +7,8 @@
   "scripts": {
     "build": "cd meddraft_ai/search/browser_engine && tsc",
     "start": "node meddraft_ai/search/browser_engine/dist/cli.js",
-    "install-browsers": "npx playwright install chromium"
+    "install-browsers": "npx playwright install chromium",
+    "setup": "cd meddraft_ai/search/browser_engine && npm install && npm run build && npx playwright install chromium"
   },
   "dependencies": {
     "playwright": "^1.49.0",

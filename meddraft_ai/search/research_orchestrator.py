@@ -1,8 +1,11 @@
 import os
 import sys
 import json
-import subprocess
+import time
 import logging
+import urllib.request
+import urllib.parse
+import subprocess
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -196,3 +199,98 @@ class ResearchOrchestrator:
                 deduplicated.append(p)
 
         return deduplicated[:limit]
+
+    def deep_dive(self, identifier: str) -> Dict[str, Any]:
+        """Fetches full metadata for a single paper: abstract, OA status, PMCID, PDF link.
+
+        Accepts a DOI, a PMID (optionally prefixed with `PMID:`), or a JSON string
+        with at least one of {doi, pmid, title}.
+        """
+        query, source = self._resolve_deep_dive_query(identifier)
+
+        url = (
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+            f"?query={urllib.parse.quote_plus(query)}&resultType=core&format=json"
+        )
+        req = urllib.request.Request(url, headers={'User-Agent': 'MedDraft_AI/1.0 (mailto:researcher@meddraft.ai)'})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        items = data.get("resultList", {}).get("result", [])
+        if not items:
+            return {"identifier": identifier, "source": source, "error": "No record found", "success": False}
+
+        item = items[0]
+        full_text = item.get("fullTextUrlList", {}).get("fullTextUrl", [])
+        pdf_links = [f["url"] for f in full_text if f.get("documentStyle") == "pdf" or f.get("url", "").lower().endswith(".pdf")]
+
+        return {
+            "identifier": identifier,
+            "source": source,
+            "success": True,
+            "title": item.get("title", ""),
+            "authors": item.get("authorString", ""),
+            "journal": item.get("journalTitle", ""),
+            "year": item.get("pubYear", ""),
+            "doi": item.get("doi", ""),
+            "pmid": item.get("pmid", ""),
+            "pmcid": item.get("pmcid", ""),
+            "is_oa": item.get("isOpenAccess") == "Y",
+            "abstract": item.get("abstractText", ""),
+            "pdf_url": pdf_links[0] if pdf_links else None,
+            "url": f"https://europepmc.org/article/{item.get('source', 'MED')}/{item.get('id')}"
+        }
+
+    def _resolve_deep_dive_query(self, identifier: str) -> tuple:
+        """Converts a DOI / PMID / JSON input into a Europe PMC search query."""
+        raw = identifier.strip()
+        if raw.startswith("{"):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                raise ValueError("Invalid JSON identifier.")
+            if payload.get("doi"):
+                return f"DOI:{payload['doi']}", "DOI"
+            if payload.get("pmid"):
+                return f"EXT_ID:{payload['pmid']}:MED", "PMID"
+            if payload.get("title"):
+                return f'"{payload["title"]}"', "TITLE"
+            raise ValueError("JSON identifier must contain doi, pmid or title.")
+        if raw.lower().startswith("pmid:"):
+            return f"EXT_ID:{raw.split(':', 1)[1].strip()}:MED", "PMID"
+        if re.match(r"^10\.\d{4,9}/", raw):
+            return f"DOI:{raw}", "DOI"
+        if raw.isdigit():
+            return f"EXT_ID:{raw}:MED", "PMID"
+        return f'"{raw}"', "TITLE"
+
+    def download(self, paper: Any, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+        """Downloads an open-access PDF. Accepts a dict with title/pdf_url or a JSON string."""
+        if isinstance(paper, str):
+            paper = json.loads(paper)
+
+        title = paper.get("title", "paper")
+        pdf_url = paper.get("pdf_url", "") or paper.get("pdfUrl", "")
+        if not pdf_url:
+            return {"success": False, "error": "No pdf_url provided.", "title": title}
+
+        target_dir = Path(output_dir) if output_dir else self.download_dir
+        safe_title = re.sub(r'[^a-zA-Z0-9 _-]', '', title)[:120].strip().replace(' ', '_')
+        output_path = target_dir / f"{safe_title or 'paper'}.pdf"
+
+        try:
+            req = urllib.request.Request(pdf_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+            })
+            with urllib.request.urlopen(req, timeout=60) as response:
+                content = response.read()
+            if not content.startswith(b"%PDF"):
+                raise ValueError(f"URL did not return a PDF (got {content[:8]!r}).")
+            output_path.write_bytes(content)
+            return {"success": True, "path": str(output_path), "bytes": len(content), "title": title}
+        except Exception as e:
+            logger.warning(f"Direct PDF download failed ({e}); falling back to browser engine.")
+            res = self._call_browser_engine("download-pdf", pdf_url, str(output_path))
+            if res.get("success"):
+                return {"success": True, "path": res.get("path", str(output_path)), "title": title}
+            return {"success": False, "error": str(e), "title": title}

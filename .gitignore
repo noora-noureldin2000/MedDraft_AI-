@@ -12,6 +12,11 @@ ENV/
 # Node.js
 node_modules/
 dist/
+!meddraft_ai/search/browser_engine/dist/
+!meddraft_ai/search/browser_engine/dist/**
+
+# Browser engine runtime state (Chrome user profile, cookies, login data)
+meddraft_ai/search/auth/
 
 # Outputs & Downloads
 outputs/

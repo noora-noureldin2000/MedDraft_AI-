@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
-    "install-browsers": "npx playwright install chromium"
+    "install-browsers": "npx playwright install chromium",
+    "setup": "npm install && npm run build && npm run install-browsers"
   },
   "dependencies": {
     "playwright": "^1.49.0",
