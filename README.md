@@ -47,9 +47,8 @@ cd D:\GitHub\MedDraft_AI
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Install Node dependencies and Playwright browser engine
-npm install
-npx playwright install chromium
+# Install Node dependencies, compile the browser engine, and download Chromium
+npm run setup
 ```
 
 ### 3. Configuration
@@ -85,6 +84,31 @@ python main.py --topic "Telemedicine in rural cardiology" --type systematic-revi
 
 # Specifying Output Formats and Search Depth
 python main.py --topic "CAR-T cell therapy in refractory lymphoma" --search-depth 15 --output-format both
+```
+
+### Research Surfer CLI (`refs`)
+
+The `research-surfer` skill (`meddraft_ai/prompts/research_surfer/`) wraps the same search orchestrator and browser engine behind a standalone CLI. All commands run from the repo root:
+
+```bash
+# Combined API + stealth-browser deep search (PubMed, ScienceDirect, Scholar, CrossRef, Semantic Scholar, Europe PMC)
+python -m meddraft_ai refs deep-search "your query string" --limit 5
+
+# Google Scholar direct browser search (Playwright stealth)
+python -m meddraft_ai refs scholar-search "your query string" --limit 5
+
+# Paper deep dive: abstract, open-access status, PMCID, PDF link
+python -m meddraft_ai refs deep-dive "10.1038/nature12373"   # DOI, PMID, or JSON
+
+# Download an open-access PDF to outputs/downloaded_papers/
+python -m meddraft_ai refs download "{\"title\": \"Paper Title\", \"pdf_url\": \"https://example.com/paper.pdf\"}"
+```
+
+Low-level DOM navigation (mapped `data-agent-id`) is available through the compiled browser engine directly:
+
+```bash
+node meddraft_ai/search/browser_engine/dist/cli.js navigate <url>
+node meddraft_ai/search/browser_engine/dist/cli.js click <url> <id>
 ```
 
 ---
