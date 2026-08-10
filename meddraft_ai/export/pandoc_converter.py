@@ -1,4 +1,3 @@
-import os
 import subprocess
 import logging
 from pathlib import Path
@@ -27,7 +26,7 @@ def convert_markdown_to_docx(md_path: str | Path, output_docx_path: Optional[str
             logger.info(f"Pandoc conversion successful: {out_file}")
             return str(out_file)
     except Exception as e:
-        logger.info(f"Pandoc not available or failed: {e}. Falling back to python-docx converter.")
+        logger.warning("Pandoc not available or failed: %s. Falling back to python-docx converter.", e)
 
     # Fallback to python-docx converter
     return create_docx_from_markdown(str(md_file), str(out_file))

@@ -104,29 +104,37 @@ class FullTextScreener:
         """Finds a local markdown file that matches the study title using fuzzy title matching."""
         if not fulltext_dir or not fulltext_dir.exists():
             return None
-            
-        # Normalise study title
+
         normalized_title = StudyDeduplicator.clean_title(title)
-        
-        # Scan all .md files
+
         for path in fulltext_dir.glob("**/*.md"):
-            # Check if filename is similar
             file_title = StudyDeduplicator.clean_title(path.stem)
-            if file_title and normalized_title in file_title or file_title in normalized_title:
+            # Guard: both strings must be long enough to be meaningful before substring matching.
+            # Short stems like '1' or 'a' would match almost any title and assign wrong full-text.
+            if (
+                file_title
+                and len(file_title) > 10
+                and len(normalized_title) > 10
+                and (normalized_title in file_title or file_title in normalized_title)
+            ):
                 return path
-            
-            # Read first few lines of file to see if Title is written there
+
+            # Also scan first few lines of the file for a title header
             try:
                 content = path.read_text(encoding="utf-8", errors="ignore")
-                # Look for first header or line
                 lines = [l.strip() for l in content.splitlines() if l.strip()][:5]
                 for line in lines:
                     line_clean = StudyDeduplicator.clean_title(line)
-                    if line_clean and (normalized_title in line_clean or line_clean in normalized_title):
+                    if (
+                        line_clean
+                        and len(line_clean) > 10
+                        and len(normalized_title) > 10
+                        and (normalized_title in line_clean or line_clean in normalized_title)
+                    ):
                         return path
             except Exception:
                 pass
-                
+
         return None
 
     def screen_fulltext(self, records: list[dict], fulltext_dir: Path = None, session_file: Path = None, max_workers: int = 3) -> list[dict]:
@@ -135,20 +143,24 @@ class FullTextScreener:
         eligible_records = [r for r in records if r.get("screening", {}).get("verdict") in ("INCLUDE", "UNSURE")]
         excluded_records = [r for r in records if r.get("screening", {}).get("verdict") == "EXCLUDE"]
         
-        results = list(excluded_records) # Excludes are carried over directly
-        screened_results = []
+        # Track skips separately so they don't corrupt the batch checkpoint index.
+        # start_index must map strictly to positions in eligible_records.
+        skip_records: list[dict] = []
+        screened_results: list[dict] = []
         start_index = 0
-        
+
         if session_file and session_file.exists():
             try:
                 with open(session_file, "r", encoding="utf-8") as f:
                     saved_data = json.load(f)
                 screened_results = saved_data.get("results", [])
+                skip_records = saved_data.get("skips", [])
                 start_index = len(screened_results)
                 console.print(f"[bold green]Resuming full-text screening from index {start_index}...[/bold green]")
             except Exception as e:
                 console.print(f"[red]Error loading session file, starting fresh: {e}[/red]")
                 screened_results = []
+                skip_records = []
 
         records_to_process = eligible_records[start_index:]
         
@@ -192,14 +204,15 @@ class FullTextScreener:
                     console.print(f"[red]Could not fetch full text from URL: {e}[/red]")
             
             if not full_text:
-                # If we cannot locate full text, we must mark it as UNSURE / Missing Fulltext
+                # Cannot locate full text — record the skip separately so it does
+                # NOT inflate start_index and corrupt the checkpoint on resume.
                 console.print(f"[red]Skipped:[/red] Full-text not found for '{title[:50]}...'")
-                screened_rec = dict(rec)
-                screened_rec["fulltext"] = {
+                skip_rec = dict(rec)
+                skip_rec["fulltext"] = {
                     "verdict": "EXCLUDE",
                     "reason": "Exclusion: Full-text report not retrieved."
                 }
-                screened_results.append(screened_rec)
+                skip_records.append(skip_rec)
                 skipped_count += 1
                 continue
                 
@@ -231,13 +244,22 @@ class FullTextScreener:
                 
                 for idx, out in enumerate(batch_outputs):
                     rec = batch_tasks[idx][0]
+                    # Strip markdown code fences that LLMs sometimes wrap JSON in.
+                    # Without this, json.loads raises and the except silently defaults
+                    # to EXCLUDE, removing valid studies from the review.
+                    cleaned = out.strip()
+                    if cleaned.startswith("```"):
+                        cleaned = cleaned.lstrip("`").strip()
+                        if cleaned.lower().startswith("json"):
+                            cleaned = cleaned[4:].strip()
+                        cleaned = cleaned.rstrip("`").strip()
                     try:
-                        decision = json.loads(out)
+                        decision = json.loads(cleaned)
                         verdict = decision.get("verdict", "EXCLUDE").upper()
                         reason = decision.get("reason", "No reason provided.")
                     except Exception:
                         verdict = "EXCLUDE"
-                        reason = f"Exclusion: Error parsing LLM response. Raw: {out[:100]}"
+                        reason = f"Exclusion: Error parsing LLM response. Raw: {out[:200]}"
                         
                     screened_rec = dict(rec)
                     screened_rec["fulltext"] = {
@@ -246,17 +268,22 @@ class FullTextScreener:
                     }
                     screened_results.append(screened_rec)
                     
-                # Save progress
+                # Save progress: results (LLM-processed) and skips are stored separately
+                # so start_index always reflects only processed records on resume.
                 if session_file:
                     try:
                         with open(session_file, "w", encoding="utf-8") as f:
-                            json.dump({"results": screened_results}, f, ensure_ascii=False, indent=2)
+                            json.dump(
+                                {"results": screened_results, "skips": skip_records},
+                                f, ensure_ascii=False, indent=2
+                            )
                     except Exception:
                         pass
                         
                 progress.update(task_id, advance=len(batch_tasks))
                 
-        final_list = results + screened_results
+        # Merge: previously excluded + skipped (no full-text) + LLM-screened
+        final_list = results + skip_records + screened_results
         
         # Summary
         final_includes = sum(1 for r in final_list if r.get("fulltext", {}).get("verdict") == "INCLUDE")

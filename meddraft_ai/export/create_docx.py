@@ -3,11 +3,7 @@ import re
 from pathlib import Path
 from typing import Optional
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 
 class MarkdownDocxConverter:
     """
@@ -48,6 +44,36 @@ class MarkdownDocxConverter:
         run.italic = italic
         return p
 
+    def _add_inline_formatted(self, paragraph, text: str) -> None:
+        """
+        Parse a line of text for **bold** and *italic* markdown markers and add
+        properly-formatted runs to an existing paragraph object.
+        """
+        # Tokenise the line into alternating plain/bold/italic segments.
+        # Pattern: **bold** or *italic* (non-overlapping, bold checked first)
+        pattern = re.compile(r'(\*\*(.+?)\*\*|\*(.+?)\*)')
+        last_end = 0
+        for m in pattern.finditer(text):
+            # Plain text before this match
+            if m.start() > last_end:
+                run = paragraph.add_run(text[last_end:m.start()])
+                run.font.name = self.font_name
+                run.font.size = Pt(self.font_size)
+            if m.group(0).startswith('**'):
+                run = paragraph.add_run(m.group(2))
+                run.bold = True
+            else:
+                run = paragraph.add_run(m.group(3))
+                run.italic = True
+            run.font.name = self.font_name
+            run.font.size = Pt(self.font_size)
+            last_end = m.end()
+        # Remaining plain text
+        if last_end < len(text):
+            run = paragraph.add_run(text[last_end:])
+            run.font.name = self.font_name
+            run.font.size = Pt(self.font_size)
+
     def convert_markdown(self, md_content: str, output_path: str | Path) -> str:
         lines = md_content.split('\n')
         in_code_block = False
@@ -72,24 +98,54 @@ class MarkdownDocxConverter:
             elif line_str.startswith('### '):
                 self.add_heading_custom(line_str[4:], level=3)
             elif line_str.startswith('- ') or line_str.startswith('* '):
-                self.add_paragraph_styled(f"• {line_str[2:]}")
+                p = self.doc.add_paragraph()
+                p.paragraph_format.line_spacing = 2.0
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_before = Pt(0)
+                self._add_inline_formatted(p, f"• {line_str[2:]}")
             else:
-                # Process inline bold/italic
-                clean_text = re.sub(r'\*\*(.*?)\*\*', r'\1', line_str)
-                clean_text = re.sub(r'\*(.*?)\*', r'\1', clean_text)
-                self.add_paragraph_styled(clean_text)
+                # Regular paragraph — preserve inline bold/italic formatting
+                p = self.doc.add_paragraph()
+                p.paragraph_format.line_spacing = 2.0
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_before = Pt(0)
+                self._add_inline_formatted(p, line_str)
 
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         self.doc.save(str(out_path))
         return str(out_path)
 
-def create_docx_from_markdown(md_input: str | Path, output_docx_path: str | Path) -> str:
-    if os.path.exists(str(md_input)):
-        with open(md_input, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-    else:
+def create_docx_from_markdown(
+    md_input: str | Path,
+    output_docx_path: str | Path,
+    is_file: Optional[bool] = None,
+) -> str:
+    """
+    Convert markdown to DOCX.
+
+    Args:
+        md_input: Either a filesystem path to a .md file or a raw markdown string.
+        output_docx_path: Destination .docx path.
+        is_file: If True, treat md_input as a file path (raises FileNotFoundError if
+                 missing). If False, treat as a raw string. If None (default), auto-detect
+                 by checking whether the path exists — a non-existent path is treated as
+                 a string to avoid silently processing typos as markdown content.
+    """
+    if is_file is True:
+        file_path = Path(md_input)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Markdown file not found: {file_path}")
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+    elif is_file is False:
         content = str(md_input)
+    else:
+        # Auto-detect: only treat as file if it actually exists
+        candidate = Path(str(md_input))
+        if candidate.exists() and candidate.is_file():
+            content = candidate.read_text(encoding="utf-8", errors="ignore")
+        else:
+            content = str(md_input)
 
     converter = MarkdownDocxConverter()
     return converter.convert_markdown(content, output_docx_path)

@@ -6,6 +6,7 @@ CLI Entry Point & Pipeline Orchestrator
 
 import sys
 import os
+import re
 import json
 import logging
 from pathlib import Path
@@ -164,14 +165,20 @@ def main(
     md_file = out_path / f"{safe_title}_manuscript.md"
     docx_file = out_path / f"{safe_title}_manuscript.docx"
 
-    if output_format in ("md", "both"):
+    # Write markdown once — shared by both md and docx paths
+    if output_format in ("md", "both", "docx"):
         md_file.write_text(full_draft, encoding="utf-8")
+
+    if output_format in ("md", "both"):
         console.print(f"  [green]Markdown manuscript saved: {md_file}[/green]")
 
     if output_format in ("docx", "both"):
-        md_file.write_text(full_draft, encoding="utf-8")
-        convert_markdown_to_docx(md_file, docx_file)
-        console.print(f"  [green]DOCX manuscript saved: {docx_file}[/green]")
+        try:
+            convert_markdown_to_docx(md_file, docx_file)
+            console.print(f"  [green]DOCX manuscript saved: {docx_file}[/green]")
+        except Exception as export_err:
+            console.print(f"  [yellow]⚠️ DOCX export failed (Pandoc/python-docx): {export_err}[/yellow]")
+            console.print(f"  [green]Markdown saved as fallback: {md_file}[/green]")
 
     console.print(Panel.fit("[bold green]✨ Manuscript Generation Completed Successfully![/bold green]", border_style="green"))
 

@@ -92,15 +92,23 @@ class AbstractScreener:
                 
                 for idx, out in enumerate(batch_outputs):
                     rec = batch_records[idx]
+                    # Strip markdown code fences that LLMs sometimes wrap JSON in
+                    # e.g. ```json\n{...}\n``` → {...}
+                    cleaned = out.strip()
+                    if cleaned.startswith("```"):
+                        cleaned = cleaned.lstrip("`").strip()
+                        if cleaned.lower().startswith("json"):
+                            cleaned = cleaned[4:].strip()
+                        cleaned = cleaned.rstrip("`").strip()
                     # Parse JSON verdict
                     try:
-                        decision = json.loads(out)
+                        decision = json.loads(cleaned)
                         verdict = decision.get("verdict", "UNSURE").upper()
                         reason = decision.get("reason", "No reason provided.")
                     except Exception:
-                        # Fallback for parsing errors
+                        # Fallback for parsing errors — log raw output for debugging
                         verdict = "UNSURE"
-                        reason = f"Parsing Error on raw response: {out[:100]}"
+                        reason = f"Parsing Error on raw response: {out[:200]}"
                         
                     screened_record = dict(rec)
                     screened_record["screening"] = {

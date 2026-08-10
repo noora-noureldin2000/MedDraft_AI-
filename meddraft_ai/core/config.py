@@ -1,7 +1,10 @@
 import os
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 import json
+
+logger = logging.getLogger(__name__)
 
 try:
     from dotenv import load_dotenv
@@ -33,6 +36,7 @@ class Config:
     
     # Token & Context Limits
     MAX_CONTEXT_TOKENS: int = 100000
+    LLM_TEMPERATURE: float = 0.2
     
     # Academic Database Integrations
     NCBI_API_KEY: str = field(default_factory=lambda: os.getenv("NCBI_API_KEY", ""))
@@ -64,13 +68,17 @@ def load_config() -> Config:
             for key, val in data.items():
                 if hasattr(default_config, key):
                     if key in ("WORKSPACE_ROOT", "OUTPUT_DIR", "PROMPTS_DIR", "TEMPLATES_DIR"):
-                        setattr(default_config, key, Path(val))
+                        p = Path(val)
+                        # Resolve relative paths against workspace root, not CWD
+                        if not p.is_absolute():
+                            p = default_config.WORKSPACE_ROOT / p
+                        setattr(default_config, key, p)
                     elif isinstance(getattr(default_config, key), bool):
                         setattr(default_config, key, bool(val))
                     else:
                         setattr(default_config, key, val)
         except Exception as e:
-            print(f"⚠️ Error reading config.json: {e}. Using default config.")
+            logger.warning("Error reading config.json: %s. Using default config.", e)
     return default_config
 
 _config_instance = None

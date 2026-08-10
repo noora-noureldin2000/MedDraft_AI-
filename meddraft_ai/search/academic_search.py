@@ -130,7 +130,10 @@ def search_sciencedirect_api(query: str, limit: int = 10) -> str:
                 "journal": entry.get("prism:publicationName", "Unknown Journal"),
                 "year": entry.get("prism:coverDate", "")[:4] if entry.get("prism:coverDate") else "Unknown",
                 "doi": doi,
-                "url": f"https://doi.org/{doi}" if doi else entry.get("link", [{}])[0].get("@href", ""),
+                "url": f"https://doi.org/{doi}" if doi else next(
+                    (lnk.get("@href", "") for lnk in entry.get("link", []) if isinstance(lnk, dict)),
+                    "",
+                ),
                 "open_access": entry.get("openaccess", ""),
             })
 
@@ -195,7 +198,7 @@ def search_crossref_api(query: str, limit: int = 10) -> str:
         results = []
         for item in items:
             title = " ".join(item.get("title", []))
-            authors_raw = item.get("author", [])
+            authors_raw = item.get("author") or []
             authors = []
             for a in authors_raw:
                 given = a.get("given", "")

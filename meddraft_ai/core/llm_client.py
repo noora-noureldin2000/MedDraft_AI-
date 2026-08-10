@@ -2,8 +2,9 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout
 
 from meddraft_ai.core.config import get_config
 from meddraft_ai.core.provider_router import ProviderRouter
@@ -19,7 +20,14 @@ class LLMClient:
         self.config = get_config()
         self.router = ProviderRouter()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    # Retry only on transient network failures: connection errors, timeouts, HTTP 429/5xx.
+    # Auth errors (401/403) and bad requests (400) are NOT retried — they will always fail.
+    @retry(
+        retry=retry_if_exception_type((RequestsConnectionError, Timeout, requests.exceptions.HTTPError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
     def query(self, system_prompt: str, user_prompt: str, image_path: Optional[str] = None) -> str:
         route_info = self.router.route(user_prompt, image_path)
         
@@ -32,8 +40,15 @@ class LLMClient:
 
     def _query_openai_compatible(self, system_prompt: str, user_prompt: str, route_info: Dict[str, Any]) -> str:
         base_url = route_info.get("base_url") or self.config.SIMPLE_BASE_URL
-        api_key = route_info.get("api_key") or self.config.SIMPLE_API_KEY or os.getenv("OPENAI_API_KEY", "dummy")
+        api_key = route_info.get("api_key") or self.config.SIMPLE_API_KEY or os.getenv("OPENAI_API_KEY", "")
         model = route_info.get("model") or self.config.SIMPLE_MODEL
+        temperature = self.config.LLM_TEMPERATURE
+
+        # Raise early rather than using a dummy key that produces confusing API errors
+        if not api_key:
+            raise ValueError(
+                "No API key configured. Set SIMPLE_API_KEY (or OPENAI_API_KEY) in your .env file."
+            )
 
         # Try using standard OpenAI Python SDK if installed
         try:
@@ -45,11 +60,12 @@ class LLMClient:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.2
+                temperature=temperature
             )
             return response.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"OpenAI SDK call failed: {e}. Falling back to direct HTTP request.")
+        except (RequestsConnectionError, Timeout) as e:
+            # Only fall back on transient network errors, not auth/payload errors
+            logger.warning("OpenAI SDK call failed with transient error: %s. Falling back to direct HTTP.", e)
 
         # HTTP Fallback
         endpoint = f"{base_url.rstrip('/')}/chat/completions"
@@ -63,7 +79,7 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.2
+            "temperature": temperature
         }
 
         resp = requests.post(endpoint, json=payload, headers=headers, timeout=120)

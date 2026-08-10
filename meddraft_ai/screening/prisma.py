@@ -29,9 +29,14 @@ class PrismaFlow:
                 elif "animal" in reason_lower or "in vitro" in reason_lower:
                     reason_clean = "Non-human / in vitro study"
                 else:
-                    # Truncate long reasons to fit diagram nicely
-                    reason_clean = reason.split(":")[0].split(".")[0][:40]
-                    if not reason_clean.endswith("..."):
+                    # Truncate long reasons at a sentence boundary, not a colon.
+                    # Splitting on ':' would turn 'EXCLUDE: narrative review' into just 'EXCLUDE'.
+                    first_period = reason.find(".")
+                    if 0 < first_period <= 40:
+                        reason_clean = reason[:first_period].strip()
+                    else:
+                        reason_clean = reason[:40].strip()
+                    if reason_clean and not reason_clean.endswith("..."):
                         reason_clean += "..."
                         
                 categories[reason_clean] = categories.get(reason_clean, 0) + 1

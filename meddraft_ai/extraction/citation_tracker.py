@@ -89,7 +89,7 @@ class CitationVerifier:
                     title = (message.get("title") or ["Unknown"])[0]
                     journal = (message.get("container-title") or ["Unknown"])[0]
                     authors = [f"{a.get('family', '')}, {a.get('given', '')}".strip(', ') for a in message.get("author", []) if a.get("family")]
-                    pub_date = message.get("published", {}).get("date-parts", [[None]])[0][0]
+                    pub_date = (message.get("published") or {}).get("date-parts", [[None]])[0][0]
 
                     return VerifiedCitation(
                         doi=message.get("DOI", clean_doi),

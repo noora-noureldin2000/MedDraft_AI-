@@ -1,13 +1,13 @@
 import sys
 import re
+import logging
 from pathlib import Path
-from rich.console import Console
 
 from meddraft_ai.core.config import get_config
 from meddraft_ai.core.skill_registry import SkillRegistry
 from meddraft_ai.core.llm_client import LLMClient
 
-console = Console()
+logger = logging.getLogger(__name__)
 
 class BaseSpecialist:
     def __init__(self, name: str, folder_keywords: list):
@@ -19,23 +19,27 @@ class BaseSpecialist:
 
     def _read_prompt_file(self, file_path: str) -> str:
         try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                return f.read().strip()
-        except Exception:
+            return Path(file_path).read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            return Path(file_path).read_text(encoding="utf-8", errors="replace").strip()
+        except FileNotFoundError:
+            logger.warning("Prompt file not found: %s", file_path)
+            return ""
+        except OSError as err:
+            logger.error("Cannot read prompt file %s: %s", file_path, err)
             return ""
 
     def get_preamble(self) -> str:
         preamble_path = self.config.PROMPTS_DIR / "agent_instructions.md"
         if preamble_path.exists():
             try:
-                with open(preamble_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
+                content = preamble_path.read_text(encoding="utf-8")
                 rules_end = content.find("## Task 1:")
                 if rules_end != -1:
                     return content[:rules_end].strip()
                 return content[:5000].strip()
-            except Exception as e:
-                return f"Preamble Error: {e}"
+            except OSError as err:
+                logger.error("Cannot read preamble file %s: %s", preamble_path, err)
         return "Core Persona: MedDraft_AI Medical Research Assistant (Zero-Hallucination Policy enabled)."
 
     def load_context(self) -> str:
@@ -60,7 +64,15 @@ class BaseSpecialist:
 
     def execute(self, user_query: str) -> str:
         prompts = self.format_prompt(user_query)
-        return self.llm.query(prompts["system_prompt"], prompts["user_prompt"])
+        try:
+            return self.llm.query(prompts["system_prompt"], prompts["user_prompt"])
+        except ValueError as err:
+            # Missing API key — surface clearly so the user can act on it
+            logger.error("%s specialist failed — configuration error: %s", self.name, err)
+            raise
+        except Exception as err:
+            logger.error("%s specialist LLM call failed: %s", self.name, err)
+            raise RuntimeError(f"{self.name} specialist failed: {err}") from err
 
 
 class CoreWriterSpecialist(BaseSpecialist):
@@ -78,12 +90,14 @@ class HumanizerSpecialist(BaseSpecialist):
     """
     Applied as an on-demand post-processing pass over full manuscript drafts.
     Incorporate Dr. Noora Noureldin's writing style markers and anti-AI clichés.
+    Loads context from both humanizer_noora and humanizer-main prompt directories.
     """
     def __init__(self):
-        super().__init__("HUMANIZER", ["humanizer_noora", "humanizer_general"])
+        super().__init__("HUMANIZER", ["humanizer_noora", "humanizer_general", "humanizer-main"])
 
     def humanize(self, full_manuscript_text: str) -> str:
-        console.print("[bold yellow]Executing on-demand humanization pass...[/bold yellow]")
+        # Presentation (console output) belongs to the CLI layer; this method
+        # only performs the LLM transformation and returns the result.
         user_prompt = (
             f"Please humanize the following completed academic manuscript draft while strictly preserving "
             f"all scientific facts, numbers, citations, and evidence integrity.\n\n"

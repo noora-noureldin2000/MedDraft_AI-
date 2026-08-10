@@ -1,5 +1,8 @@
 import json
+import logging
 from meddraft_ai.core.llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
 
 class MedicalWriterAgent:
     """
@@ -39,4 +42,11 @@ class MedicalWriterAgent:
             f"Computed Results JSON:\n{json.dumps(stats_json, indent=2)}\n\n"
             f"Please write a comprehensive Results section narrative and APA 7th table."
         )
-        return self.llm.query(system_prompt, user_prompt)
+        try:
+            return self.llm.query(system_prompt, user_prompt)
+        except ValueError as err:
+            logger.error("MedicalWriterAgent failed — configuration error: %s", err)
+            raise
+        except Exception as err:
+            logger.error("MedicalWriterAgent LLM call failed: %s", err)
+            raise RuntimeError(f"MedicalWriterAgent failed: {err}") from err
