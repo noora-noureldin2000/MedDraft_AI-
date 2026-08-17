@@ -40,6 +40,7 @@ class Config:
     
     # Academic Database Integrations
     NCBI_API_KEY: str = field(default_factory=lambda: os.getenv("NCBI_API_KEY", ""))
+    OPENALEX_API_KEY: str = field(default_factory=lambda: os.getenv("OPENALEX_API_KEY", ""))
     SCIENCEDIRECT_API_KEY: str = field(default_factory=lambda: os.getenv("SCIENCEDIRECT_API_KEY", ""))
     APIFY_TOKEN: str = field(default_factory=lambda: os.getenv("APIFY_TOKEN", ""))
     FINDPAPERS_EMAIL: str = field(default_factory=lambda: os.getenv("FINDPAPERS_EMAIL", ""))

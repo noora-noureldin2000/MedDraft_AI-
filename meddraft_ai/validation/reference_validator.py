@@ -54,6 +54,12 @@ from datetime import datetime, timezone
 
 # ─── Conditional imports ────────────────────────────────────────────────────
 try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / ".env")
+except ImportError:
+    pass
+
+try:
     import requests
 except ImportError:
     print("ERROR: 'requests' package is required.  Install with:")
@@ -204,6 +210,7 @@ def _request_with_retry(
     url: str,
     *,
     params: dict | None = None,
+    headers: dict | None = None,
     retries: int = MAX_RETRIES,
     timeout: int = 15,
 ) -> Optional[requests.Response]:
@@ -211,7 +218,7 @@ def _request_with_retry(
     delay = BASE_DELAY
     for attempt in range(retries + 1):
         try:
-            resp = _session.request(method, url, params=params, timeout=timeout)
+            resp = _session.request(method, url, params=params, headers=headers, timeout=timeout)
             if resp.status_code == 200:
                 return resp
             if resp.status_code == 404:
@@ -372,11 +379,14 @@ def _query_semantic_scholar(citation: Citation) -> Optional[dict]:
 
 def _query_openalex(citation: Citation) -> Optional[dict]:
     """Query OpenAlex by DOI or title."""
+    headers = {}
+    if os.getenv("OPENALEX_API_KEY"):
+        headers["X-Api-Key"] = os.getenv("OPENALEX_API_KEY")
     # By DOI
     if citation.doi:
         doi_clean = clean_doi(citation.doi)
         url = f"{OPENALEX_API}/https://doi.org/{doi_clean}"
-        resp = _request_with_retry("GET", url, params={"mailto": "research@nooramedical.com"})
+        resp = _request_with_retry("GET", url, params={"mailto": "research@nooramedical.com"}, headers=headers)
         if resp:
             try:
                 data = resp.json()
@@ -391,7 +401,7 @@ def _query_openalex(citation: Citation) -> Optional[dict]:
             "per_page": "5",
             "mailto": "research@nooramedical.com",
         }
-        resp = _request_with_retry("GET", OPENALEX_API, params=params)
+        resp = _request_with_retry("GET", OPENALEX_API, params=params, headers=headers)
         if resp:
             try:
                 for work in resp.json().get("results", []):

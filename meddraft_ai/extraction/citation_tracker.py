@@ -1,4 +1,5 @@
 import re
+import os
 import json
 import requests
 from pathlib import Path
@@ -110,7 +111,10 @@ class CitationVerifier:
         # 3. OpenAlex API
         try:
             url = f"https://api.openalex.org/works/https://doi.org/{clean_doi}"
-            resp = requests.get(url, headers={"User-Agent": "MedDraft_AI/1.0"}, timeout=10)
+            headers = {"User-Agent": "MedDraft_AI/1.0"}
+            if os.getenv("OPENALEX_API_KEY"):
+                headers["X-Api-Key"] = os.getenv("OPENALEX_API_KEY")
+            resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 if data and data.get("title"):
