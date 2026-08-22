@@ -5,7 +5,7 @@ export class PubMedSurfer {
     }
     async search(page, query, limit = 10) {
         console.log(`🔍 PubMedSurfer: Searching PubMed for "${query}"`);
-        await page.goto('https://pubmed.ncbi.nlm.nih.gov/', { waitUntil: 'domcontentloaded' });
+        await page.goto('https://pubmed.ncbi.nlm.nih.gov/', { waitUntil: 'domcontentloaded', timeout: 30000 });
         await this.browser.delay(2000, 3000);
         const searchInputSelector = '#id_term';
         await page.waitForSelector(searchInputSelector, { timeout: 10000 });

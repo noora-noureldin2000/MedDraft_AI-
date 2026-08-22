@@ -27,7 +27,7 @@ export class ScholarSurfer {
     console.log(`🔍 ScholarSurfer: Searching Google Scholar for "${query}"`);
     
     // Navigate to Google Scholar landing page
-    await page.goto('https://scholar.google.com', { waitUntil: 'domcontentloaded' });
+    await page.goto('https://scholar.google.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await this.browser.delay(2000, 3000);
 
     // Solve captcha if present on load

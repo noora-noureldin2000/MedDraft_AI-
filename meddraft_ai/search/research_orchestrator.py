@@ -76,7 +76,8 @@ class ResearchOrchestrator:
                 text=True,
                 encoding="utf-8",
                 check=True,
-                env=env
+                env=env,
+                timeout=150
             )
             
             stdout_lines = result.stdout.strip().split('\n')
@@ -85,6 +86,9 @@ class ResearchOrchestrator:
                     return json.loads(line)
             
             return {"success": False, "error": f"No JSON output from browser engine: {result.stdout}"}
+        except subprocess.TimeoutExpired:
+            logger.error(f"Browser engine timed out for command: {command}")
+            return {"success": False, "error": f"Browser engine timed out (150s) for command: {command}"}
         except Exception as e:
             logger.error(f"Browser engine execution exception: {e}")
             return {"success": False, "error": str(e)}

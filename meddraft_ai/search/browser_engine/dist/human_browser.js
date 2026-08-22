@@ -31,7 +31,7 @@ export class HumanBrowser {
         const viewportWidth = Math.floor(Math.random() * (1920 - 1280 + 1)) + 1280;
         const viewportHeight = Math.floor(Math.random() * (1080 - 720 + 1)) + 720;
         const contextOptions = {
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
             viewport: { width: viewportWidth, height: viewportHeight },
             locale: 'en-US',
             timezoneId: 'America/New_York',
@@ -196,12 +196,20 @@ export class HumanBrowser {
      */
     async transcribeAudio(audioUrl) {
         return new Promise((resolve) => {
-            // Find the transcription helper script relative to workspace
             const transcribeScript = path.resolve(__dirname, '../../web_scraper/transcribe.py');
             console.log(`Calling Python transcriber: ${transcribeScript}`);
             const py = spawn('python', [transcribeScript, audioUrl]);
             let stdout = '';
             let stderr = '';
+            let settled = false;
+            const timer = setTimeout(() => {
+                if (!settled) {
+                    settled = true;
+                    py.kill('SIGTERM');
+                    console.error('Transcription script timed out after 30s.');
+                    resolve(null);
+                }
+            }, 30_000);
             py.stdout.on('data', (data) => {
                 stdout += data.toString();
             });
@@ -209,6 +217,10 @@ export class HumanBrowser {
                 stderr += data.toString();
             });
             py.on('close', (code) => {
+                if (settled)
+                    return;
+                settled = true;
+                clearTimeout(timer);
                 if (code === 0) {
                     resolve(stdout.trim());
                 }
@@ -216,6 +228,14 @@ export class HumanBrowser {
                     console.error(`Transcription script failed with code ${code}. Error: ${stderr}`);
                     resolve(null);
                 }
+            });
+            py.on('error', (err) => {
+                if (settled)
+                    return;
+                settled = true;
+                clearTimeout(timer);
+                console.error(`Failed to spawn transcription script: ${err.message}`);
+                resolve(null);
             });
         });
     }
