@@ -8,7 +8,7 @@ console = Console()
 try:
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import DocumentConverter as DoclingDocumentConverter, PdfFormatOption
     DOCLING_AVAILABLE = True
 except ImportError:
     DOCLING_AVAILABLE = False
@@ -51,7 +51,7 @@ class DocumentConverterEngine:
                 do_table_structure=True,
             )
             pipeline_opts.table_structure_options.do_cell_matching = True
-            converter = DocumentConverter(
+            converter = DoclingDocumentConverter(
                 format_options={
                     InputFormat.PDF: PdfFormatOption(
                         pipeline_options=pipeline_opts,
@@ -109,6 +109,7 @@ class DocumentConverterEngine:
 
     def _fallback_extract_text(self) -> str:
         text = self._extract_with_pypdf()
+        self.markdown_text = text
         md_path = self.markdown_dir / f"{self.doc_name}.md"
         md_path.write_text(text, encoding="utf-8")
         return str(md_path)
