@@ -25,6 +25,7 @@ This produces `meddraft_ai/search/browser_engine/dist/cli.js`, which is committe
 - **Human typing delay**: Type search queries character-by-character with 50-200ms delay per key.
 - **Enter over Click**: Submit search queries by pressing 'Enter' on the keyboard rather than clicking the search button directly.
 - **Headful Mode**: All browser commands run headful by default (both direct `node` runs and Python CLI calls). Set `BROWSER_HEADLESS=true` in `.env` to opt into headless mode — extensions will not load there.
+- **Fingerprints**: The browser inherits your machine's real user agent, locale, and timezone by default, keeping them consistent with each other. When routing through a proxy, set `BROWSER_LOCALE` and `BROWSER_TIMEZONE_ID` in `.env` to match the proxy's country.
 - **CAPTCHA Handling**: The engine auto-clicks the reCAPTCHA checkbox when it appears. If Google presents an interactive challenge, solve it manually in the opened browser window (headful mode required); the command will fail fast otherwise. There is no automated audio-challenge solver.
 
 ### 2. Omnichannel Strategy
@@ -32,16 +33,37 @@ This produces `meddraft_ai/search/browser_engine/dist/cli.js`, which is committe
 - **Browser-Fallback**: Use Google Scholar Playwright surfing (`refs scholar-search` or `refs deep-search`) for broad searches, citation network tracking, or when APIs yield insufficient results.
 - **Deduplication**: Automatically deduplicate retrieved papers by DOI or Jaccard title similarity (>0.85).
 
-### 3. Mapped DOM Navigation
-- When navigating web pages manually:
-  1. Retrieve the compressed accessibility tree (`node meddraft_ai/search/browser_engine/dist/cli.js navigate <url>`).
-  2. Locate the target elements (inputs, links, buttons) and identify their `data-agent-id`.
-  3. Issue page interactions using the mapped `data-agent-id` value (`node meddraft_ai/search/browser_engine/dist/cli.js click <url> <id>`).
-  4. Allow the page to settle for 2-3 seconds after any click.
+### 3. Mapped DOM Navigation (session mode — preferred)
+For navigating arbitrary sites, start one persistent stealth browser session and drive it with JSONL on stdin; each reply is a single JSON line on stdout:
 
-### 4. PDF Recovery & Verification
-- Check for direct PDF links (`pdfLink` or Unpaywall `pdf_url`) or PMC IDs (`PMCxxxx`).
-- Download open-access papers to `outputs/downloaded_papers/` using `refs download`.
+```bash
+node meddraft_ai/search/browser_engine/dist/cli.js --session
+```
+
+Requests and replies:
+
+```
+{"id":"1","op":"goto","url":"https://scholar.google.com"}   → reply carries a snapshot
+{"id":"2","op":"state"}                                     → fresh snapshot
+{"id":"3","op":"click","index":5}                           → acts, then returns a new snapshot automatically
+{"id":"4","op":"type","index":0,"text":"sepsis biomarkers","submit":true}
+{"id":"5","op":"scroll","down":true,"pixels":800}
+{"id":"6","op":"tabs"}   /   {"id":"7","op":"select_tab","index":1}
+{"id":"8","op":"download","url":"https://…/paper.pdf","path":"outputs/downloaded_papers/paper.pdf"}
+{"id":"9","op":"close"}
+```
+
+Rules:
+1. Element indices come from the latest snapshot's serialized text (`[N]` lines); elements marked `*` appeared since the previous snapshot.
+2. Never reuse indices across snapshots — after any navigation the old indices are invalid and acting on them fails fast with an error.
+3. If `click` reports `newTabIndex`, switch with `select_tab` before continuing on that page.
+4. Interactive CAPTCHA challenges must be solved manually in the opened window (`{"op":"captcha"}` retries the checkbox).
+
+The legacy one-shot commands below still work but relaunch the browser and re-map IDs on every invocation, so prefer session mode for multi-step navigation.
+
+## PDF Recovery & Verification
+- Check for direct PDF links (`pdfLink`, Unpaywall `pdf_url`, or snapshot `»` hrefs) or PMC IDs (`PMCxxxx`).
+- Download open-access papers to `outputs/downloaded_papers/` using `refs download` or the session `download` op.
 - Verify any scraped citation metadata (e.g., DOI, PMID) against CrossRef or NCBI databases.
 
 ## CLI Command Reference
@@ -60,6 +82,9 @@ All commands below are run from the repo root. The Python CLI wraps the same sea
 - **Download Open-Access PDF**:
   `python -m meddraft_ai refs download "{\"title\": \"Paper Title\", \"pdf_url\": \"https://example.com/paper.pdf\"}"`
 
-- **Raw DOM navigation (mapped `data-agent-id`)**:
+- **Session mode (persistent stealth browser, JSONL protocol)**:
+  `node meddraft_ai/search/browser_engine/dist/cli.js --session`
+
+- **Raw DOM navigation (legacy one-shot, mapped `data-agent-id`)**:
   `node meddraft_ai/search/browser_engine/dist/cli.js navigate <url>`
   `node meddraft_ai/search/browser_engine/dist/cli.js click <url> <id>`

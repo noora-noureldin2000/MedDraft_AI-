@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
+    "test": "node --test ./test/*.test.mjs",
     "install-browsers": "npx playwright install chromium",
     "setup": "npm install && npm run build && npm run install-browsers"
   },

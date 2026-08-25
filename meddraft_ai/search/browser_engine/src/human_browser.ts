@@ -4,7 +4,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Browser, BrowserContext, Page } from 'playwright';
 
-chromium.use(stealthPlugin());
+// The stealth UA override ships a stale hardcoded agent that fights the browser's
+// own consistent identity; the native Chromium UA + client hints are already coherent.
+const stealth = stealthPlugin();
+stealth.enabledEvasions.delete('user-agent-override');
+chromium.use(stealth);
 
 export interface BrowserConfig {
   headless: boolean;
@@ -15,6 +19,8 @@ export interface BrowserConfig {
   };
   extensionPath?: string; // Path to CaptchaSonic or other unpacked extensions
   sessionPath?: string;    // Storage state JSON path
+  locale?: string;         // e.g. "en-US" — set only when aligning with a proxy
+  timezoneId?: string;     // e.g. "America/New_York" — set only when aligning with a proxy
 }
 
 export class HumanBrowser {
@@ -48,17 +54,18 @@ export class HumanBrowser {
       );
     }
 
-    const viewportWidth = Math.floor(Math.random() * (1920 - 1280 + 1)) + 1280;
-    const viewportHeight = Math.floor(Math.random() * (1080 - 720 + 1)) + 720;
-
-    const contextOptions: any = {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-      viewport: { width: viewportWidth, height: viewportHeight },
-      locale: 'en-US',
-      timezoneId: 'America/New_York',
-      geolocation: { longitude: -73.935242, latitude: 40.730610 },
-      permissions: ['geolocation'],
-    };
+    // Headful: viewport null keeps inner/outer window metrics consistent (a real
+    // browser trait). Headless: a randomized compact viewport.
+    const contextOptions: any = {};
+    if (this.config.locale) contextOptions.locale = this.config.locale;
+    if (this.config.timezoneId) contextOptions.timezoneId = this.config.timezoneId;
+    if (!this.config.headless) {
+      contextOptions.viewport = null;
+    } else {
+      const viewportWidth = Math.floor(Math.random() * (1440 - 1024 + 1)) + 1024;
+      const viewportHeight = Math.floor(Math.random() * (900 - 640 + 1)) + 640;
+      contextOptions.viewport = { width: viewportWidth, height: viewportHeight };
+    }
 
     if (this.config.proxy) {
       contextOptions.proxy = this.config.proxy;

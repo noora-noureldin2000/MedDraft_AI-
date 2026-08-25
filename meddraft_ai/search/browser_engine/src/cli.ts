@@ -2,6 +2,7 @@ import { HumanBrowser } from './human_browser.js';
 import { cleanScientificDOM } from './dom_compressor.js';
 import { ScholarSurfer } from './scholar_surfer.js';
 import { PubMedSurfer } from './pubmed_surfer.js';
+import { runSession } from './session.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -54,6 +55,14 @@ function getBrowserConfig() {
     cfg.extensionPath = path.resolve(process.env.CAPTCHASONIC_PATH);
   }
 
+  // Optional fingerprint alignment (e.g. to match a proxy's country); inherit host otherwise
+  if (process.env.BROWSER_LOCALE) {
+    cfg.locale = process.env.BROWSER_LOCALE;
+  }
+  if (process.env.BROWSER_TIMEZONE_ID) {
+    cfg.timezoneId = process.env.BROWSER_TIMEZONE_ID;
+  }
+
   return cfg;
 }
 
@@ -69,6 +78,17 @@ async function main() {
   }
 
   const browserConfig = getBrowserConfig();
+
+  if (command === '--session') {
+    try {
+      await runSession(browserConfig);
+    } catch (error: any) {
+      console.error(JSON.stringify({ success: false, error: error.message }));
+      process.exit(1);
+    }
+    return;
+  }
+
   const browser = new HumanBrowser(browserConfig);
   let page: Page | null = null;
 
