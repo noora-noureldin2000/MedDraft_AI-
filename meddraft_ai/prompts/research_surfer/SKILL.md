@@ -24,7 +24,8 @@ This produces `meddraft_ai/search/browser_engine/dist/cli.js`, which is committe
 - **Wait Times**: Never click elements or type characters back-to-back in under 1.5 seconds.
 - **Human typing delay**: Type search queries character-by-character with 50-200ms delay per key.
 - **Enter over Click**: Submit search queries by pressing 'Enter' on the keyboard rather than clicking the search button directly.
-- **Headful Mode**: Scholar surfing uses headful mode (`headless: false`) under the hood to bypass token checks and allow manual CAPTCHA solving if needed.
+- **Headful Mode**: All browser commands run headful by default (both direct `node` runs and Python CLI calls). Set `BROWSER_HEADLESS=true` in `.env` to opt into headless mode — extensions will not load there.
+- **CAPTCHA Handling**: The engine auto-clicks the reCAPTCHA checkbox when it appears. If Google presents an interactive challenge, solve it manually in the opened browser window (headful mode required); the command will fail fast otherwise. There is no automated audio-challenge solver.
 
 ### 2. Omnichannel Strategy
 - **API-First**: Always check PubMed (`search_pubmed_api`) or ScienceDirect (`search_sciencedirect_api`) first for biomedical and scientific queries, as APIs do not trigger Cloudflare or CAPTCHA limits.

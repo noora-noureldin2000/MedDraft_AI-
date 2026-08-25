@@ -2,7 +2,6 @@ import { chromium } from 'playwright-extra';
 import stealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn } from 'child_process';
 chromium.use(stealthPlugin());
 export class HumanBrowser {
     config;
@@ -99,7 +98,8 @@ export class HumanBrowser {
         await new Promise((resolve) => setTimeout(resolve, delayTime));
     }
     /**
-     * Attempts to solve reCAPTCHA using speech-to-text (GoogleRecaptchaBypass model)
+     * Attempts the reCAPTCHA checkbox. Instant passes return true; interactive
+     * challenges must be solved manually in the headful window.
      */
     async solveReCaptcha(page) {
         try {
@@ -114,129 +114,21 @@ export class HumanBrowser {
             const checkbox = await anchorFrame.waitForSelector('#recaptcha-anchor', { timeout: 5000 });
             if (!checkbox)
                 return false;
-            // Click the checkbox
+            // Click the checkbox and hope for an instant pass
             console.log('👆 Clicking reCAPTCHA checkbox...');
             await checkbox.click();
             await this.delay(1000, 2000);
-            // Check if solved immediately
             const isChecked = await checkbox.getAttribute('aria-checked');
             if (isChecked === 'true') {
-                console.log('✅ reCAPTCHA solved immediately without challenge.');
+                console.log('✅ reCAPTCHA solved.');
                 return true;
             }
-            // Check if challenge frame is visible
-            const bframes = page.frames().filter(f => f.url().includes('recaptcha/api2/bframe'));
-            if (bframes.length === 0) {
-                console.log('ℹ️ No challenge frame found.');
-                return false;
-            }
-            const bframe = bframes[0];
-            console.log('🎧 Switching to audio challenge...');
-            const audioButton = await bframe.waitForSelector('#recaptcha-audio-button', { timeout: 5000 });
-            if (!audioButton) {
-                console.log('❌ Audio button not found in challenge frame.');
-                return false;
-            }
-            await audioButton.click();
-            await this.delay(2000, 3000);
-            // Check if Google blocked us from audio challenge
-            const isBlocked = await bframe.$('.rc-dsa-audio-blocked, .rc-audiochallenge-error-message');
-            if (isBlocked) {
-                console.log('❌ Google blocked audio challenge (too many attempts or suspicious activity).');
-                return false;
-            }
-            // Get audio URL
-            const downloadLink = await bframe.waitForSelector('.rc-audiochallenge-download-link', { timeout: 5000 });
-            if (!downloadLink) {
-                console.log('❌ Audio download link not found.');
-                return false;
-            }
-            const audioUrl = await downloadLink.getAttribute('href');
-            if (!audioUrl)
-                return false;
-            console.log(`🎵 Audio URL found: ${audioUrl}`);
-            // Call Python backend to solve speech to text
-            const transcript = await this.transcribeAudio(audioUrl);
-            if (!transcript) {
-                console.log('❌ Audio transcription failed.');
-                return false;
-            }
-            console.log(`📝 Transcribed text: "${transcript}"`);
-            // Input transcript into challenge text box
-            const inputField = await bframe.waitForSelector('#audio-response', { timeout: 5000 });
-            if (!inputField)
-                return false;
-            await inputField.fill(transcript);
-            await this.delay(1000, 2000);
-            // Click verify button
-            const verifyButton = await bframe.waitForSelector('#recaptcha-verify-button', { timeout: 5000 });
-            if (!verifyButton)
-                return false;
-            await verifyButton.click();
-            await this.delay(2000, 3000);
-            // Check if solved
-            const isSolved = await checkbox.getAttribute('aria-checked');
-            if (isSolved === 'true') {
-                console.log('✅ reCAPTCHA solved successfully via audio transcription!');
-                return true;
-            }
-            else {
-                console.log('❌ reCAPTCHA solve verification failed.');
-                return false;
-            }
+            console.log('❌ Interactive CAPTCHA challenge presented — solve it manually in the browser window (headful mode), then re-run the command.');
+            return false;
         }
         catch (e) {
             console.error('⚠️ Error in solveReCaptcha:', e);
             return false;
         }
-    }
-    /**
-     * Transcribes audio using Python's speech recognition / Google STT API.
-     * Calls a helper script `agent_core/web_scraper/transcribe.py` via subprocess.
-     */
-    async transcribeAudio(audioUrl) {
-        return new Promise((resolve) => {
-            const transcribeScript = path.resolve(__dirname, '../../web_scraper/transcribe.py');
-            console.log(`Calling Python transcriber: ${transcribeScript}`);
-            const py = spawn('python', [transcribeScript, audioUrl]);
-            let stdout = '';
-            let stderr = '';
-            let settled = false;
-            const timer = setTimeout(() => {
-                if (!settled) {
-                    settled = true;
-                    py.kill('SIGTERM');
-                    console.error('Transcription script timed out after 30s.');
-                    resolve(null);
-                }
-            }, 30_000);
-            py.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-            py.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
-            py.on('close', (code) => {
-                if (settled)
-                    return;
-                settled = true;
-                clearTimeout(timer);
-                if (code === 0) {
-                    resolve(stdout.trim());
-                }
-                else {
-                    console.error(`Transcription script failed with code ${code}. Error: ${stderr}`);
-                    resolve(null);
-                }
-            });
-            py.on('error', (err) => {
-                if (settled)
-                    return;
-                settled = true;
-                clearTimeout(timer);
-                console.error(`Failed to spawn transcription script: ${err.message}`);
-                resolve(null);
-            });
-        });
     }
 }

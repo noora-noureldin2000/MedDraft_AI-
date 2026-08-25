@@ -11,12 +11,26 @@ import { Page } from 'playwright';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load env variables
+// Load env variables from the nearest .env, walking up to the repo root
 import { config } from 'dotenv';
-config({ path: path.resolve(__dirname, '../../../.env') });
+
+function findEnvFile(startDir: string): string | undefined {
+  let dir = startDir;
+  for (let depth = 0; depth < 6; depth++) {
+    const candidate = path.join(dir, '.env');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+config({ path: findEnvFile(__dirname) });
 
 function getBrowserConfig() {
-  const headless = process.env.BROWSER_HEADLESS !== 'false'; // Default to headless unless specified false
+  // Headful by default: stealth checks, extensions and manual CAPTCHA solving all require it.
+  const headless = process.env.BROWSER_HEADLESS === 'true';
   const proxyServer = process.env.PROXY_SERVER || '';
   const proxyUsername = process.env.PROXY_USERNAME || '';
   const proxyPassword = process.env.PROXY_PASSWORD || '';
@@ -58,8 +72,12 @@ async function main() {
   const browser = new HumanBrowser(browserConfig);
   let page: Page | null = null;
 
+  let cancelGlobalTimeout: () => void = () => {};
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`Global timeout: command "${command}" exceeded ${GLOBAL_TIMEOUT_MS / 1000}s`)), GLOBAL_TIMEOUT_MS);
+    const handle = setTimeout(() => reject(new Error(`Global timeout: command "${command}" exceeded ${GLOBAL_TIMEOUT_MS / 1000}s`)), GLOBAL_TIMEOUT_MS);
+    // unref: a finished command must not linger 120s just because this timer is pending
+    handle.unref();
+    cancelGlobalTimeout = () => clearTimeout(handle);
   });
 
   try {
@@ -81,6 +99,7 @@ async function main() {
     console.error(JSON.stringify({ success: false, error: error.message }));
     process.exit(1);
   } finally {
+    cancelGlobalTimeout();
     await browser.close();
   }
 }
