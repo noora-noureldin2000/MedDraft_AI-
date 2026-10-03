@@ -29,6 +29,10 @@ Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automat
    - **Dual Path**: Route text tasks to DeepSeek V4 Flash and visual chart inspection to local Qwen 2.5 VL (via Ollama).
 8. **Dual Output Formatting**:
    - Generates both clean Markdown (`.md`) and styled Microsoft Word (`.docx`) files with Times New Roman 12pt, double spacing, and APA table borders via Pandoc and `python-docx`.
+9. **Project-Grounded Drafting**:
+   - `--project-dir` loads protocol, results, and discussion notes (Markdown) from a local project folder and treats them as the authoritative source — no invented data, references, or protocol details. With `--type thesis`, this focuses generation on the Discussion and References chapters (inverted-funnel structure with required ending headers).
+10. **Post-Humanization Re-Verification**:
+   - After the optional humanization pass, the full draft's references are re-validated live, since humanization can alter citation formatting.
 
 ---
 
@@ -84,7 +88,12 @@ python main.py --topic "Telemedicine in rural cardiology" --type systematic-revi
 
 # Specifying Output Formats and Search Depth
 python main.py --topic "CAR-T cell therapy in refractory lymphoma" --search-depth 15 --output-format both
+
+# Source-grounded thesis Discussion generation from project files
+python main.py --topic "Hibiscus extract on periodontal healing" --type thesis --project-dir ./projects/BioGap_G2_Hibiscus
 ```
+
+`--project-dir` points at a folder of Markdown materials (protocol, results, notes); when omitted but `--pdf-input` is given, the PDF's parent folder is auto-detected as the project directory.
 
 ### Research Surfer CLI (`refs`)
 
@@ -113,24 +122,66 @@ node meddraft_ai/search/browser_engine/dist/cli.js click <url> <id>
 
 ---
 
+## 🧠 Agent Skills & Prompt Packs
+
+The repo carries two skill layers, both wired into the project's "brain":
+
+**Agent skills (`.agents/skills/`)** — quality gates and compliance guides applied to AI-assisted work in this repository. They are pinned in `skills-lock.json` (the `npx skills` lockfile format), and `tests/test_skills_lock.py` verifies every installed skill directory has a matching lock entry:
+
+| Skill | Role |
+|---|---|
+| `clean-code-guard` | Reactive review of generated/changed production code (Clean Code, SOLID, DRY, KISS, YAGNI, LLM failure modes) |
+| `test-guard` | Reactive review of generated/changed test code |
+| `docs-guard` | Reactive review of generated/changed documentation |
+| `thesis-master-guide` | Cairo University Faculty of Dentistry Master Thesis formatting and content guide (27-component order, margins, spacing, reference style) |
+| `wp-guard` / `woo-guard` | WordPress / WooCommerce code review gates (kept from the shared guard-skills toolkit) |
+
+**Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
+
+`academic-writing` · `academic_research_skills` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `thesis-discussion-writer`
+
+Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically.
+
+---
+
+## 🧪 Testing
+
+```bash
+pytest tests/ -v
+
+# Windows Python 3.12 known issue (see tests/conftest.py): a pypdfium2 native
+# crash at collection time — pytest recovers, but it can be suppressed via:
+pytest tests/ -v --ignore=tests/test_pdf.py
+```
+
+---
+
 ## 🏛️ Repository Architecture
 
 ```
 D:\GitHub\MedDraft_AI\
+├── main.py                     # CLI entry point — multi-phase manuscript pipeline
 ├── meddraft_ai/
-│   ├── core/           # Configuration, LLM client, Provider routing
-│   ├── search/         # PubMed, ScienceDirect, Scholar, Europe PMC, Browser engine
-│   ├── extraction/     # PDF reading, Docling extraction, citation anchoring
-│   ├── screening/      # RIS/CSV parser, deduplication, PRISMA flow
-│   ├── agents/         # CoreWriter, Humanizer, Verifier, ProofReader, MedicalWriter
-│   ├── validation/     # Live CrossRef & PubMed reference verification
-│   ├── export/         # DOCX converter, Pandoc pipeline, journal formatters
-│   ├── prompts/        # IMRAD prompts, sciwrite, APA rules, style guides
-│   └── templates/      # APA statistical reporting templates
-├── main.py             # CLI entry point
-├── requirements.txt    # Python dependencies
-├── package.json        # Node / Playwright dependencies
-└── .env.example        # Configuration template
+│   ├── core/                   # Configuration, LLM client, provider routing, SkillRegistry
+│   ├── search/                 # PubMed, ScienceDirect, Scholar, Europe PMC, stealth browser engine
+│   ├── extraction/             # PDF reading, Docling extraction, citation anchoring
+│   ├── screening/              # RIS/CSV parser, deduplication, screeners, PRISMA flow
+│   ├── agents/                 # CoreWriter, Humanizer, Verifier, ProofReader, MedicalWriter
+│   ├── validation/             # Live CrossRef & PubMed reference verification
+│   ├── export/                 # DOCX converter, Pandoc pipeline, journal formatters
+│   ├── prompts/                # Prompt & skill packs (registered in core/skill_registry.py)
+│   └── templates/              # APA statistical reporting templates
+├── .agents/skills/             # Agent skills: guard skills + thesis-master-guide
+├── skills-lock.json            # Pin file for .agents/skills (npx skills lockfile)
+├── tests/                      # Pytest suite (skill registry, lock, search, PDF, export, validation)
+├── projects/                   # Local research projects for --project-dir (gitignored)
+├── outputs/                    # Generated manuscripts, downloads, scratch runs (gitignored)
+├── ARCHITECTURE.md             # Pipeline and provider routing diagrams
+├── CONTRIBUTING.md             # Code style, test, and PR process
+├── PLUG_AND_PLAY_PROMPTS.md    # Ready-to-use prompt recipes (.docx twin available)
+├── requirements.txt            # Python dependencies
+├── package.json                # Node / Playwright dependencies (browser engine)
+└── .env.example                # Configuration template
 ```
 
 ---

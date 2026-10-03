@@ -135,6 +135,6 @@ class AbstractScreener:
         excludes = sum(1 for r in results if r["screening"]["verdict"] == "EXCLUDE")
         unsures = sum(1 for r in results if r["screening"]["verdict"] == "UNSURE")
         
-        console.print(f"📊 [bold]Abstract Screening Summary:[/bold] Included: [green]{includes}[/green] | Excluded: [red]{excludes}[/red] | Unsure: [yellow]{unsures}[/yellow]")
+        console.print(f"[bold]Abstract Screening Summary:[/bold] Included: [green]{includes}[/green] | Excluded: [red]{excludes}[/red] | Unsure: [yellow]{unsures}[/yellow]")
         
         return results

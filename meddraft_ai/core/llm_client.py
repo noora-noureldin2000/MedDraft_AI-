@@ -19,6 +19,9 @@ class LLMClient:
     def __init__(self):
         self.config = get_config()
         self.router = ProviderRouter()
+        # Compatibility shims for screening modules expecting these attributes
+        self.api_type = self.config.LLM_PROVIDER or "openai_compatible"
+        self.model_name = self.config.SIMPLE_MODEL or self.config.MAIN_MODEL or "gpt-4o-mini"
 
     # Retry only on transient network failures: connection errors, timeouts, HTTP 429/5xx.
     # Auth errors (401/403) and bad requests (400) are NOT retried — they will always fail.
@@ -110,3 +113,31 @@ class LLMClient:
         resp.raise_for_status()
         data = resp.json()
         return data.get("response", "")
+
+    def run_parallel_screening(self, tasks: list[tuple[str, str, bool]], max_workers: int = 5) -> list[str]:
+        """Parallel wrapper for screener modules. Executes query() concurrently."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        results: list[str | None] = [None] * len(tasks)
+
+        def _call(idx: int, sys_p: str, usr_p: str) -> tuple[int, str]:
+            try:
+                out = self.query(sys_p, usr_p)
+                return idx, out
+            except Exception as e:
+                logger.error(f"LLM screening task {idx} failed: {e}")
+                return idx, f'{{\"verdict\": \"UNSURE\", \"reason\": \"LLM error: {e}\"}}'
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for idx, task in enumerate(tasks):
+                # tasks are (system_prompt, user_prompt, bool) - bool is unused
+                sys_p, usr_p = task[0], task[1]
+                futures[executor.submit(_call, idx, sys_p, usr_p)] = idx
+
+            for fut in as_completed(futures):
+                idx, out = fut.result()
+                results[idx] = out
+
+        # Ensure no None remains
+        return [r if r is not None else '{"verdict": "UNSURE", "reason": "No response"}' for r in results]

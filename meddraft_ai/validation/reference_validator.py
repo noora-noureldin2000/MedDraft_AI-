@@ -191,6 +191,18 @@ def clean_doi(raw: str) -> str:
     return raw
 
 
+def strip_doi_edge(raw: str) -> str:
+    """Strip trailing sentence punctuation and any unbalanced closing parenthesis.
+
+    DOIs may legitimately contain parentheses (e.g. 10.1016/S0002-9394(02)02220-1),
+    so a trailing ')' is only removed when it is not balanced by an opening '('.
+    """
+    doi = raw.strip().rstrip(".,;]")
+    while doi.endswith(")") and doi.count("(") < doi.count(")"):
+        doi = doi[:-1].rstrip(".,;]")
+    return doi
+
+
 def cache_key(citation: Citation) -> str:
     """Deterministic key for caching."""
     raw = f"{clean_doi(citation.doi)}|{normalise_title(citation.title)}"
@@ -754,9 +766,9 @@ def parse_markdown(filepath: Path) -> list[Citation]:
     citations = []
 
     # Extract DOIs
-    doi_pattern = r"(?:doi[:\s]?\s*|https?://(?:dx\.)?doi\.org/)(10\.\d{4,}/[^\s,;)\]]+)"
+    doi_pattern = r"(?:doi[:\s]?\s*|https?://(?:dx\.)?doi\.org/)(10\.\d{4,}/[^\s,;\]]+)"
     for match in re.finditer(doi_pattern, text, re.IGNORECASE):
-        doi = match.group(1).rstrip(".")
+        doi = strip_doi_edge(match.group(1))
         cit_id = f"md_doi_{len(citations)}"
         citations.append(Citation(
             id=cit_id,
@@ -790,9 +802,9 @@ def parse_text(filepath: Path) -> list[Citation]:
         text = f.read()
 
     citations = []
-    doi_pattern = r"(10\.\d{4,}/[^\s,;)\]\"']+)"
+    doi_pattern = r"(10\.\d{4,}/[^\s,;\]\"']+)"
     for match in re.finditer(doi_pattern, text):
-        doi = match.group(1).rstrip(".")
+        doi = strip_doi_edge(match.group(1))
         citations.append(Citation(
             id=f"txt_doi_{len(citations)}",
             doi=doi,

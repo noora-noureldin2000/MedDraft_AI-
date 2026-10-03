@@ -2,7 +2,7 @@
 
 ## System Overview
 
-MedDraft_AI is structured as a 13-stage pipeline orchestrated by `main.py`:
+MedDraft_AI is structured as a multi-phase pipeline orchestrated by `main.py`:
 
 ```mermaid
 graph TD
@@ -33,10 +33,17 @@ graph LR
 
 ## Module Structure
 
-- `meddraft_ai.core`: Configuration management, LLM interface, provider routing.
+- `meddraft_ai.core`: Configuration management, LLM interface, provider routing, and the `SkillRegistry` that indexes prompt packs.
 - `meddraft_ai.search`: Multi-database APIs and Playwright stealth browser engine for Google Scholar.
 - `meddraft_ai.extraction`: Docling-based text/table extraction, PDF reading, page-level citation anchoring.
 - `meddraft_ai.screening`: PICO abstract/fulltext screening, RIS/CSV parsing, PRISMA flow diagrams.
 - `meddraft_ai.agents`: CoreWriter, Humanizer, VerifierAndStats, ProofReader, MedicalWriterAgent.
 - `meddraft_ai.validation`: Live CrossRef and PubMed reference verification.
 - `meddraft_ai.export`: Python-docx and Pandoc Markdown-to-DOCX conversion with publisher styles.
+
+## Skill & Prompt Registry
+
+Two skill layers feed the system:
+
+- **Pipeline prompt packs** live in `meddraft_ai/prompts/`. The `SkillRegistry` (`meddraft_ai/core/skill_registry.py`) indexes every `.md`/`.txt` file at runtime; a new pack only needs its folder name added to `REGISTERED_PROMPT_SUBDIRS` in that module.
+- **Agent skills** live in `.agents/skills/` (guard skills for code/test/docs review plus the `thesis-master-guide` compliance skill). They are pinned in `skills-lock.json` (`npx skills` lockfile format); `tests/test_skills_lock.py` enforces that every installed skill directory has a lock entry.

@@ -11,17 +11,20 @@ logger = logging.getLogger(__name__)
 # Prompt sub-directories that are always scanned in addition to the root.
 # New folders only need to be added here — no other code change required.
 REGISTERED_PROMPT_SUBDIRS: List[str] = [
+    "academic-writing",
     "academic_research_skills",
     "claude_scientific_writer",
     "doi_reference_validator",
     "humanizer-main",       # Phase 2: newly registered
     "humanizer_noora",
+    "language-refinement",
     "med_paper_assistant",
     "medical_research_skills",
     "research_surfer",
     "sciwrite",
     "pdf",                  # Phase 2: newly registered
     "docx",                 # Phase 2: newly registered
+    "thesis-discussion-writer",
 ]
 
 

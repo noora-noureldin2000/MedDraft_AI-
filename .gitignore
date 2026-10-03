@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.pytest_cache/
 env/
 venv/
 ENV/
@@ -23,9 +24,13 @@ outputs/
 downloaded_papers/
 pdf_extractions/
 
+# Local research project data (input to --project-dir)
+projects/
+
 # IDE & OS
 .idea/
 .vscode/
 .DS_Store
 desktop.ini
 Thumbs.db
+~$*

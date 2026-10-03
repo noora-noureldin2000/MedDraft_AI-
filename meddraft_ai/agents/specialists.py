@@ -43,13 +43,25 @@ class BaseSpecialist:
         return "Core Persona: MedDraft_AI Medical Research Assistant (Zero-Hallucination Policy enabled)."
 
     def load_context(self) -> str:
+        MAX_CONTEXT_CHARS = 60000
         context_parts = []
+        total_chars = 0
         for skill in self.registry.skills:
             path_str = skill["abs_path"].replace("\\", "/")
-            if any(kw in path_str for kw in self.folder_keywords):
-                content = self._read_prompt_file(skill["abs_path"])
-                if content:
-                    context_parts.append(f"### SKILL: {skill['name']}\n{content}\n")
+            if not any(kw in path_str for kw in self.folder_keywords):
+                continue
+            skill_path = Path(skill["abs_path"])
+            folder = skill_path.parent
+            if (folder / "SKILL.md").exists() and skill_path.name != "SKILL.md":
+                continue
+            content = self._read_prompt_file(skill["abs_path"])
+            if not content:
+                continue
+            entry = f"### SKILL: {skill['name']}\n{content}\n"
+            if total_chars + len(entry) > MAX_CONTEXT_CHARS:
+                break
+            context_parts.append(entry)
+            total_chars += len(entry)
         return "\n".join(context_parts)
 
     def format_prompt(self, user_query: str) -> dict:

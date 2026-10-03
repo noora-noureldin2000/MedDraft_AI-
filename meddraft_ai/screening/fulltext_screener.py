@@ -166,7 +166,7 @@ class FullTextScreener:
         
         if not records_to_process:
             # Combine already screened results with excluded ones
-            final_list = results + screened_results
+            final_list = excluded_records + skip_records + screened_results
             return final_list
             
         console.print(f"Starting full-text screening of [bold cyan]{len(records_to_process)}[/bold cyan] eligible articles...")
@@ -221,7 +221,7 @@ class FullTextScreener:
             tasks.append((rec, sys_p, usr_p))
             
         if not tasks:
-            final_list = results + screened_results
+            final_list = excluded_records + skip_records + screened_results
             return final_list
 
         # Screen remaining articles using LLM
@@ -283,13 +283,13 @@ class FullTextScreener:
                 progress.update(task_id, advance=len(batch_tasks))
                 
         # Merge: previously excluded + skipped (no full-text) + LLM-screened
-        final_list = results + skip_records + screened_results
+        final_list = excluded_records + skip_records + screened_results
         
         # Summary
         final_includes = sum(1 for r in final_list if r.get("fulltext", {}).get("verdict") == "INCLUDE")
         final_excludes = sum(1 for r in final_list if r.get("fulltext", {}).get("verdict") == "EXCLUDE")
         
         console.print("[bold green]Full-text screening completed![/bold green]")
-        console.print(f"📊 [bold]Full-Text Screening Summary:[/bold] Included: [green]{final_includes}[/green] | Excluded: [red]{final_excludes}[/red] (including {skipped_count} missing full-text).")
+        console.print(f"[bold]Full-Text Screening Summary:[/bold] Included: [green]{final_includes}[/green] | Excluded: [red]{final_excludes}[/red] (including {skipped_count} missing full-text).")
         
         return final_list

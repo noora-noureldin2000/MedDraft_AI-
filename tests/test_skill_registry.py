@@ -43,6 +43,15 @@ class TestRegisteredSubdirs:
     def test_docx_dir_is_registered(self):
         assert "docx" in REGISTERED_PROMPT_SUBDIRS
 
+    def test_academic_writing_dir_is_registered(self):
+        assert "academic-writing" in REGISTERED_PROMPT_SUBDIRS
+
+    def test_language_refinement_dir_is_registered(self):
+        assert "language-refinement" in REGISTERED_PROMPT_SUBDIRS
+
+    def test_thesis_discussion_writer_dir_is_registered(self):
+        assert "thesis-discussion-writer" in REGISTERED_PROMPT_SUBDIRS
+
 
 # ---------------------------------------------------------------------------
 # SkillRegistry.load()

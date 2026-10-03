@@ -34,6 +34,18 @@ from meddraft_ai.export.pandoc_converter import convert_markdown_to_docx
 console = Console()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+def load_project_context(project_path: Path) -> str:
+    """Read project Markdown sources for source-grounded drafting."""
+    context_parts = []
+    for source_file in sorted(project_path.glob("*.md")):
+        try:
+            content = source_file.read_text(encoding="utf-8")
+        except OSError as err:
+            logging.warning("Could not read project file %s: %s", source_file, err)
+            continue
+        context_parts.append(f"\n--- PROJECT FILE: {source_file.name} ---\n{content}")
+    return "".join(context_parts)
+
 @click.command()
 @click.option("--topic", prompt="Research topic/question", help="The medical topic or research question to write about.")
 @click.option("--type", "manuscript_type", default="manuscript", type=click.Choice([
@@ -48,6 +60,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 @click.option("--output-format", default="both", type=click.Choice(["md", "docx", "both"]), help="Output file format.")
 @click.option("--data-file", default=None, help="Path to pre-computed stats JSON or raw dataset.")
 @click.option("--pdf-input", default=None, help="Path to reference PDF file(s) for extraction.")
+@click.option("--project-dir", default=None, help="Directory containing protocol, results, and discussion notes.")
 @click.option("--provider", default=None, type=click.Choice(["dual", "simple"]), help="LLM provider mode.")
 @click.option("--verbose", is_flag=True, default=False, help="Enable verbose log output.")
 def main(
@@ -61,6 +74,7 @@ def main(
     output_format: str,
     data_file: str,
     pdf_input: str,
+    project_dir: str,
     provider: str,
     verbose: bool
 ):
@@ -81,6 +95,21 @@ def main(
     out_path.mkdir(parents=True, exist_ok=True)
 
     evidence_summary = ""
+
+    # Use the PDF's parent as the project directory when available. This keeps
+    # the documented PDF command useful even when the source PDF is accompanied
+    # by extracted Markdown files rather than being present locally.
+    project_path = Path(project_dir) if project_dir else None
+    if project_path is None and pdf_input:
+        candidate = Path(pdf_input).parent
+        if candidate.exists():
+            project_path = candidate
+
+    project_context = ""
+    if project_path and project_path.is_dir():
+        project_context = load_project_context(project_path)
+        source_count = len(list(project_path.glob("*.md")))
+        console.print(f"  Loaded [green]{source_count}[/] project Markdown file(s) from [green]{project_path}[/]")
 
     # --- Step 1: Deep Literature Search ---
     console.print("\n[bold blue]Phase 1: Multi-Stage Literature Search[/bold blue]")
@@ -125,6 +154,8 @@ def main(
         "Title and Abstract", "Introduction", "Literature Review",
         "Methodology", "Results", "Discussion", "Conclusion & Future Work"
     ] if sections == "all" else [s.strip() for s in sections.split(",")]
+    if sections == "all" and manuscript_type == "thesis" and project_context:
+        section_list = ["Discussion", "References"]
 
     manuscript_draft_parts = [f"# {topic.title()}\n"]
 
@@ -136,7 +167,12 @@ def main(
             prompt = (
                 f"Draft the '{sec}' section for a medical {manuscript_type} on the topic: '{topic}'.\n"
                 f"Use citation style: {citation_style}.\n"
-                f"Synthesize the following verified literature evidence:\n{evidence_summary}"
+                "Use the project files below as the authoritative source for study design, results, notes, and supplied references. "
+                "Do not invent data, references, or missing protocol details. For Discussion, answer the research question first, "
+                "compare agreeing and conflicting studies, address heterogeneity and limitations, and use the exact required ending "
+                "headers: ## Summary, ## Summary of results, ## Conclusions, ## Limitations, ## Recommendations, ## References.\n"
+                f"Synthesize the following verified literature evidence:\n{evidence_summary}\n"
+                f"PROJECT MATERIALS:\n{project_context}"
             )
             sec_text = writer_agent.execute(prompt)
             manuscript_draft_parts.append(f"## {sec}\n\n{sec_text}\n")
@@ -158,6 +194,10 @@ def main(
         console.print("\n[bold blue]Phase 7: On-Demand Humanization Pass (Dr. Noora Persona)[/bold blue]")
         humanizer = HumanizerSpecialist()
         full_draft = humanizer.humanize(full_draft)
+
+        # Humanization can alter citation formatting, so verify the final text.
+        citations = validate_references(full_draft)
+        console.print(f"  Final draft reference check returned [green]{len(citations)}[/] verified references.")
 
     # --- Step 8: Document Export ---
     console.print("\n[bold blue]Phase 8: Exporting Output Documents[/bold blue]")

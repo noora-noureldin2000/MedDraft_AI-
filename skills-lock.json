@@ -19,6 +19,11 @@
       "skillPath": "skills/test-guard/SKILL.md",
       "computedHash": "1822498db8c41906ee9eb12c76018a9645e1979fbb5d0335fe27c113b5593330"
     },
+    "thesis-master-guide": {
+      "source": "./.agents/skills/thesis-master-guide",
+      "sourceType": "local",
+      "computedHash": "9dd146a072a4252980cf06e4cde0289ce8a5dcd678af47077e093eedd8a30dad"
+    },
     "woo-guard": {
       "source": "amElnagdy/guard-skills",
       "sourceType": "github",
