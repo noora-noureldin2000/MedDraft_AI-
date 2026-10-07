@@ -1,6 +1,26 @@
 {
   "version": 1,
   "skills": {
+    "academic-deep-research": {
+      "source": "./.agents/skills/academic-deep-research",
+      "sourceType": "local",
+      "computedHash": "e35081ab213706c57469bce7183e6174d2c7fb7ce4991919e15337bc73f3c24f"
+    },
+    "academic-writing-refiner": {
+      "source": "./.agents/skills/academic-writing-refiner",
+      "sourceType": "local",
+      "computedHash": "69f3996c9c74b2251dd1316ccc707124234b7fe7d14371354f99fdd498a3d448"
+    },
+    "agent-browser": {
+      "source": "./.agents/skills/agent-browser",
+      "sourceType": "local",
+      "computedHash": "4be69d5d985c7edf267f3e124c6da211e9eb7f83c4fd632e2b8667dd6012c8c8"
+    },
+    "ai-humanizer": {
+      "source": "./.agents/skills/ai-humanizer",
+      "sourceType": "local",
+      "computedHash": "d4c980842db588789ff1b94046fd8b2a8138963a8c310f67d08ff6765fa47415"
+    },
     "clean-code-guard": {
       "source": "amElnagdy/guard-skills",
       "sourceType": "github",
