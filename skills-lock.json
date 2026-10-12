@@ -75,6 +75,106 @@
       "sourceType": "github",
       "skillPath": "skills/wp-guard/SKILL.md",
       "computedHash": "e60fd3c456568e467f5217e45c1e0ed35d95cbaab331e4b86547fe01a4bf85c2"
+    },
+    "anti-defensive-writing": {
+      "source": "./.agents/skills/anti-defensive-writing",
+      "sourceType": "local",
+      "computedHash": "94bcf6e59f79618ce7eb2ff19a915c25be6123545153781a76cec07f25c4c9ed"
+    },
+    "citation-verifier": {
+      "source": "./.agents/skills/citation-verifier",
+      "sourceType": "local",
+      "computedHash": "3f5216844c1fdb54c67de2a79117fbf871446acf07ccd1c48b2fcf51547f63f1"
+    },
+    "claim-source-verification": {
+      "source": "./.agents/skills/claim-source-verification",
+      "sourceType": "local",
+      "computedHash": "5ae9bd54f316669c973697bf344a3d0493dd896ab67f212775a6f00e7c51c6f0"
+    },
+    "data-availability": {
+      "source": "./.agents/skills/data-availability",
+      "sourceType": "local",
+      "computedHash": "1fc280086263a803f8ec952f447c3ebb7b4c7d14eb973e7c1cd5a9eeb045eb74"
+    },
+    "draft-marker-discipline": {
+      "source": "./.agents/skills/draft-marker-discipline",
+      "sourceType": "local",
+      "computedHash": "2a5d150e8af9af94a658dc14aa737ea272e7a91066f005fea43dbdef56755d36"
+    },
+    "figure-planner": {
+      "source": "./.agents/skills/figure-planner",
+      "sourceType": "local",
+      "computedHash": "0d64fba8c86d5f9235fc2efb921c3e9b619af34f52daabba2d22942730e4722d"
+    },
+    "figure-style": {
+      "source": "./.agents/skills/figure-style",
+      "sourceType": "local",
+      "computedHash": "83c224819a350dacfec3182b19c5a0babca6f408976fe3552487f2bfcfc0d6e7"
+    },
+    "manuscript-optimizer": {
+      "source": "./.agents/skills/manuscript-optimizer",
+      "sourceType": "local",
+      "computedHash": "280b896064dd76f74d535497cc954c4c4a46cfa23e18dedd8da42a7b291eb210"
+    },
+    "nature-portfolio-playbook": {
+      "source": "./.agents/skills/nature-portfolio-playbook",
+      "sourceType": "local",
+      "computedHash": "fc18368aa0694207f79d1954707f32719526714b09be495cb97505c758b267d6"
+    },
+    "paper-analyzer": {
+      "source": "./.agents/skills/paper-analyzer",
+      "sourceType": "local",
+      "computedHash": "7feb6587886d779948c77019493c3777b9c7c2bf1fb7f08f574a588ae3f91a47"
+    },
+    "paper-bootstrap": {
+      "source": "./.agents/skills/paper-bootstrap",
+      "sourceType": "local",
+      "computedHash": "7b79c00f576d812580dea2e51cf8a54e225d0b674660dca32196738cb223dc38"
+    },
+    "paper-reviewer": {
+      "source": "./.agents/skills/paper-reviewer",
+      "sourceType": "local",
+      "computedHash": "dc9a352e6472e728135b169e185a3bf4cf4af8d64cd26a134c3237c3da9bd26d"
+    },
+    "rebuttal-response": {
+      "source": "./.agents/skills/rebuttal-response",
+      "sourceType": "local",
+      "computedHash": "a985a02d21bcd83ea400c220e7a6b822ea51555dac2cae2a87a162d97ed66f28"
+    },
+    "results-analysis": {
+      "source": "./.agents/skills/results-analysis",
+      "sourceType": "local",
+      "computedHash": "70553d6ce852b6aa9493f6ea9a50c7a595a8c90a9132838b53316da8f65ea883"
+    },
+    "results-section-revision": {
+      "source": "./.agents/skills/results-section-revision",
+      "sourceType": "local",
+      "computedHash": "115f08086eda158fbe165c2c8c3e935d83c2f1deb238fcd57c81c0bfbef55e33"
+    },
+    "review-article-architecture": {
+      "source": "./.agents/skills/review-article-architecture",
+      "sourceType": "local",
+      "computedHash": "9640fdc07e52d6476f2d8c104a77822d39577eac162c6e947ae25cf780a3fb8d"
+    },
+    "scientific-prose-style": {
+      "source": "./.agents/skills/scientific-prose-style",
+      "sourceType": "local",
+      "computedHash": "4cdf75f20b6cff325f67cd9a0dfe0982a07a44f4002f05dfd00f2ab5f4f6b1e6"
+    },
+    "stats-reporting-audit": {
+      "source": "./.agents/skills/stats-reporting-audit",
+      "sourceType": "local",
+      "computedHash": "d3c7b274a335c4f928d6267944bbbd60dfe2c4429afe5b8955cbbcec85c3c905"
+    },
+    "submission-audit": {
+      "source": "./.agents/skills/submission-audit",
+      "sourceType": "local",
+      "computedHash": "ee3e9d6bb4b72af7c0228799d746f887c8f845b93fe71fc1f89bfd5a60306a64"
+    },
+    "write-scientific-manuscript": {
+      "source": "./.agents/skills/write-scientific-manuscript",
+      "sourceType": "local",
+      "computedHash": "d23cbde8bc2878fe7bd6c2fc332f77dbab23b919492235409dafb1d14548ca45"
     }
   }
 }

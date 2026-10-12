@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from meddraft_ai.core.config import get_config
+from meddraft_ai.core.nature_integration import NATURE_TRIGGER_KEYWORDS as _NATURE_TRIGGERS
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,29 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "medical-clinicaltrials",  # Filtered ClinicalTrials.gov search + NCT lookup
     "citation-integrity",  # Numbered-citation discipline for lit reviews & methods
     "academic-search-agent",  # 3-phase Scholar search playbook (breadth → deep-read → iterate)
+    # Nature Paper Skills layer (20 vendored skills + manifest; see
+    # meddraft_ai/core/nature_integration.py and prompts/nature-paper-skills/).
+    "claim-source-verification",
+    "citation-verifier",
+    "stats-reporting-audit",
+    "submission-audit",
+    "rebuttal-response",
+    "paper-reviewer",
+    "manuscript-optimizer",
+    "results-section-revision",
+    "figure-planner",
+    "figure-style",
+    "scientific-prose-style",
+    "anti-defensive-writing",
+    "write-scientific-manuscript",
+    "data-availability",
+    "draft-marker-discipline",
+    "paper-bootstrap",
+    "review-article-architecture",
+    "paper-analyzer",
+    "results-analysis",
+    "nature-portfolio-playbook",
+    "nature-paper-skills",  # manifest + section-contract references
 ]
 
 # Skill name → trigger phrases used by match_skill_for_task() for automatic
@@ -72,6 +96,8 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "research log",
         "breadth search",
     ],
+    # Nature Paper Skills triggers (single source of truth in nature_integration).
+    **_NATURE_TRIGGERS,
 }
 
 
@@ -162,7 +188,8 @@ class SkillRegistry:
         """Automatically route a task description to the most relevant skill.
 
         Dedicated code-layer scorers run first (secondary-citation-extractor,
-        medical-clinicaltrials); remaining packs fall back to keyword overlap.
+        medical-clinicaltrials), then the Nature Paper Skills chain hook;
+        remaining packs fall back to keyword overlap.
 
         Returns the skill/pack name (e.g. ``"secondary-citation-extractor"``)
         or ``None`` when nothing matches confidently.
@@ -182,6 +209,17 @@ class SkillRegistry:
             from meddraft_ai.search.clinicaltrials import should_include_trials
             if should_include_trials(task_text):
                 return "medical-clinicaltrials"
+        except ImportError:
+            pass
+        # Nature Paper Skills chain hook — specific compound patterns
+        # (submission preflight, rebuttal, Results repair, figure planning,
+        # review articles, claim-source checks) route to the chain's primary
+        # skill. Runs after the dedicated scorers so existing routing wins.
+        try:
+            from meddraft_ai.core.nature_integration import get_nature_chain
+            _chain, _specialist, _skills = get_nature_chain(task_text)
+            if _skills:
+                return _skills[0]
         except ImportError:
             pass
 

@@ -42,13 +42,73 @@ class BaseSpecialist:
                 logger.error("Cannot read preamble file %s: %s", preamble_path, err)
         return "Core Persona: MedDraft_AI Medical Research Assistant (Zero-Hallucination Policy enabled)."
 
-    def load_context(self) -> str:
+    def load_context(self, task_hint: str = None) -> str:
         MAX_CONTEXT_CHARS = 60000
+        # Budget reserved for query-relevant Nature skills (phase 1 below).
+        # Existing packs keep first claim on the remainder, so non-Nature
+        # queries produce byte-identical context to before this integration.
+        NATURE_FIRST_PASS_CHARS = 30000
         context_parts = []
         total_chars = 0
+        loaded_paths = set()
+
+        def _append(abs_path: str, name: str, content: str) -> bool:
+            nonlocal total_chars
+            entry = f"### SKILL: {name}\n{content}\n"
+            if total_chars + len(entry) > MAX_CONTEXT_CHARS:
+                return False
+            context_parts.append(entry)
+            total_chars += len(entry)
+            loaded_paths.add(abs_path)
+            return True
+
+        # Phase 1: preload only the Nature skills this query actually needs
+        # (and only those assigned to this specialist). Empty for queries
+        # without Nature signals — existing behavior untouched.
+        try:
+            from meddraft_ai.core.nature_integration import (
+                get_nature_chain,
+                nature_keywords_for,
+            )
+            from meddraft_ai.core.skill_registry import AUTO_ROUTE_KEYWORDS
+            own_frags = nature_keywords_for(self.name)
+            if task_hint and own_frags:
+                _, _, chain_skills = get_nature_chain(task_hint)
+                # Chain skills first (priority order), then keyword-overlap
+                # matches at the registry's >= 2-signal threshold.
+                lowered = task_hint.lower()
+                wanted = list(chain_skills)
+                for skill_name, phrases in AUTO_ROUTE_KEYWORDS.items():
+                    if skill_name in wanted:
+                        continue
+                    if sum(1 for kw in phrases if kw in lowered) >= 2:
+                        wanted.append(skill_name)
+                budgeted = 0
+                for skill in wanted:
+                    frag = next((f for f in own_frags if skill in f), None)
+                    if frag is None:
+                        continue
+                    for reg_skill in self.registry.skills:
+                        norm = reg_skill["abs_path"].replace("\\", "/")
+                        if frag in norm and norm not in loaded_paths:
+                            content = self._read_prompt_file(reg_skill["abs_path"])
+                            if not content:
+                                continue
+                            entry_len = len(f"### SKILL: {reg_skill['name']}\n{content}\n")
+                            if budgeted + entry_len > NATURE_FIRST_PASS_CHARS:
+                                break
+                            if _append(reg_skill["abs_path"], reg_skill["name"], content):
+                                budgeted += entry_len
+                            break
+        except ImportError:
+            pass
+
+        # Phase 2: legacy walk-order loading of the remaining packs.
         for skill in self.registry.skills:
             path_str = skill["abs_path"].replace("\\", "/")
             if not any(kw in path_str for kw in self.folder_keywords):
+                continue
+            if skill["abs_path"] in loaded_paths:
                 continue
             skill_path = Path(skill["abs_path"])
             folder = skill_path.parent
@@ -59,6 +119,15 @@ class BaseSpecialist:
                 continue
             entry = f"### SKILL: {skill['name']}\n{content}\n"
             if total_chars + len(entry) > MAX_CONTEXT_CHARS:
+                if total_chars == 0:
+                    # A single oversized file (e.g. agent_instructions.md at
+                    # ~100KB) must not abort loading entirely — skip it so
+                    # smaller packs still load. Once anything has loaded, keep
+                    # the original stop-at-budget behavior, so specialists
+                    # that already load context are byte-for-byte unaffected.
+                    logger.debug("Skipping oversized skill file %s (%d chars).",
+                                 skill["abs_path"], len(entry))
+                    continue
                 break
             context_parts.append(entry)
             total_chars += len(entry)
@@ -66,7 +135,7 @@ class BaseSpecialist:
 
     def format_prompt(self, user_query: str) -> dict:
         preamble = self.get_preamble()
-        context = self.load_context()
+        context = self.load_context(user_query)
         system_prompt = (
             f"ROLE AND CORE POLICIES:\n{preamble}\n\n"
             f"SPECIALIST CONTEXT & REFERENCE SKILLS:\n{context}\n\n"
@@ -96,6 +165,13 @@ class CoreWriterSpecialist(BaseSpecialist):
             "medical_research_skills",
             "claude_scientific_writer",
             "citation-integrity",
+            # Nature layer: structural revision + figure logic + review articles.
+            "manuscript-optimizer/SKILL.md",
+            "results-section-revision/SKILL.md",
+            "figure-planner/SKILL.md",
+            "review-article-architecture/SKILL.md",
+            "paper-bootstrap/SKILL.md",
+            "draft-marker-discipline/SKILL.md",
         ])
 
 
@@ -124,7 +200,13 @@ class VerifierAndStatsSpecialist(BaseSpecialist):
         super().__init__("VERIFIER_AND_STATS", [
             "doi_reference_validator",
             "apa_reporting",
-            "academic_research_skills/academic-pipeline"
+            "academic_research_skills/academic-pipeline",
+            # Nature layer: semantic claim checks, reporting audit, preflight.
+            "claim-source-verification/SKILL.md",
+            "stats-reporting-audit/SKILL.md",
+            "submission-audit/SKILL.md",
+            "citation-verifier/SKILL.md",
+            "data-availability/SKILL.md",
         ])
 
 
@@ -135,6 +217,10 @@ class ProofReaderSpecialist(BaseSpecialist):
             "sciwrite",
             "academic_research_skills/academic-paper-reviewer",
             "citation-integrity",
+            # Nature layer: sentence lint, de-auditing, clarity/logic diagnosis.
+            "scientific-prose-style/SKILL.md",
+            "anti-defensive-writing/SKILL.md",
+            "write-scientific-manuscript/SKILL.md",
         ])
 
 
@@ -155,12 +241,40 @@ class TrialsSpecialist(BaseSpecialist):
 
 class DeepResearchSpecialist(BaseSpecialist):
     def __init__(self):
-        super().__init__("DEEP_RESEARCH", ["academic_research_skills/deep-research", "research_surfer", "academic-search-agent"])
+        super().__init__("DEEP_RESEARCH", [
+            "academic_research_skills/deep-research",
+            "research_surfer",
+            "academic-search-agent",
+            # Nature layer: single-paper deep notes.
+            "paper-analyzer/SKILL.md",
+        ])
 
 
 class AcademicPaperSpecialist(BaseSpecialist):
     def __init__(self):
-        super().__init__("ACADEMIC_PAPER", ["academic_research_skills/academic-paper", "claude_scientific_writer"])
+        super().__init__("ACADEMIC_PAPER", [
+            "academic_research_skills/academic-paper",
+            "claude_scientific_writer",
+            # Nature layer: venue fit, figure craft, findings bridge.
+            "nature-portfolio-playbook/SKILL.md",
+            "figure-style/SKILL.md",
+            "figure-planner/SKILL.md",
+            "results-analysis/SKILL.md",
+        ])
+
+
+class RebuttalSpecialist(BaseSpecialist):
+    """Author-side reviewer-response workflow: inventory every ask, draft
+    calibrated point-by-point replies, and grade coverage.
+
+    Loaded automatically whenever the task text carries rebuttal signals
+    (see SkillRegistry auto-routing for rebuttal-response / paper-reviewer).
+    """
+    def __init__(self):
+        super().__init__("REBUTTAL", [
+            "rebuttal-response/SKILL.md",
+            "paper-reviewer/SKILL.md",
+        ])
 
 
 class MedPaperAssistantSpecialist(BaseSpecialist):

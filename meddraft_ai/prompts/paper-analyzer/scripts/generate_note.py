@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Obsidian笔记生成脚本 - 正确处理frontmatter格式
+"""
+
+import sys
+import os
+import argparse
+import logging
+import json
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def get_vault_path(cli_vault=None):
+    """从CLI参数或环境变量获取vault路径"""
+    if cli_vault:
+        return cli_vault
+    env_path = os.environ.get('OBSIDIAN_VAULT_PATH')
+    if env_path:
+        return env_path
+    logger.error("未指定 vault 路径。请通过 --vault 参数或 OBSIDIAN_VAULT_PATH 环境变量设置。")
+    sys.exit(1)
+
+
+def generate_note_content(paper_id, title, authors, domain, date):
+    """生成笔记的 Markdown 内容"""
+    domain_tags = {
+        "大模型": ["大模型", "LLM"],
+        "多模态技术": ["多模态", "Vision-Language"],
+        "智能体": ["智能体", "Agent"],
+    }
+    tags = ["论文笔记"] + domain_tags.get(domain, [domain])
+    scalar = lambda value: json.dumps(value, ensure_ascii=False)
+    tags_yaml = "\n".join(f'  - {scalar(tag)}' for tag in tags)
+
+    return f'''---
+date: {scalar(date)}
+paper_id: {scalar(paper_id)}
+title: {scalar(title)}
+authors: {scalar(authors)}
+domain: {scalar(domain)}
+tags:
+{tags_yaml}
+quality_score: "[SCORE]/10"
+related_papers: []
+created: {scalar(date)}
+updated: {scalar(date)}
+status: analyzed
+---
+
+# {title}
+
+## 核心信息
+- **论文ID**：{paper_id}
+- **作者**：{authors}
+- **机构**：[从作者推断或查看论文]
+- **发布时间**：{date}
+- **会议/期刊**：[从categories推断]
+- **链接**：[arXiv](https://arxiv.org/abs/{paper_id}) | [PDF](https://arxiv.org/pdf/{paper_id})
+- **引用**：[如果可获取]
+
+## 研究问题
+[问题描述中文翻译和解释]
+
+## 方法概述
+
+### 核心方法
+
+1. [方法1]
+   - [详细描述]
+   - [关键步骤]
+   - [创新点]
+
+### 方法架构
+[架构描述和图片引用]
+
+### 关键创新
+
+1. [创新点1] - [为什么重要]
+2. [创新点2] - [为什么重要]
+3. [创新点3] - [为什么重要]
+
+## 实验结果
+
+### 数据集
+- [数据集1]：[规模、特点]
+- [数据集2]：[规模、特点]
+
+### 实验设置
+- **基线方法**：[列出对比方法]
+- **评估指标**：[列出指标]
+- **实验环境**：[硬件、超参数]
+
+### 主要结果
+[实验结果表格和关键发现]
+
+## 深度分析
+
+### 研究价值
+- **理论贡献**：[理论上的贡献]
+- **实际应用**：[实际应用价值]
+- **领域影响**：[对研究领域的潜在影响]
+
+### 优势
+- [优势1]
+- [优势2]
+- [优势3]
+
+### 局限性
+- [局限1]
+- [局限2]
+- [局限3]
+
+### 适用场景
+- [适用场景1]
+- [适用场景2]
+
+## 与相关论文对比
+
+### [[相关论文1]] - [对比关系]
+- **差异**：[本文方法的不同之处]
+- **改进**：[相比的改进点]
+- **性能对比**：[如果可用]
+
+### [[相关论文2]] - [对比关系]
+[类似格式]
+
+### [[相关论文3]] - [对比关系]
+[类似格式]
+
+## 技术路线定位
+
+本文属于[技术路线]，主要关注[具体子方向]。
+
+## 未来工作建议
+
+1. [作者建议1]
+2. [作者建议2]
+3. [基于分析的延伸建议]
+
+## 我的综合评价
+
+### 价值评分
+- **总体评分**：[X.X/10]
+- **分项评分**：
+  - 创新性：[X/10]
+  - 技术质量：[X/10]
+  - 实验充分性：[X/10]
+  - 写作质量：[X/10]
+  - 实用性：[X/10]
+
+### 突出亮点
+- [亮点1]
+- [亮点2]
+- [亮点3]
+
+### 重点关注
+- [需要特别关注的方面]
+
+### 可借鉴点
+- [可以学习借鉴的技术]
+- [可以应用的方法]
+- [有启发性的思路]
+
+### 批判性思考
+- [潜在问题]
+- [可改进之处]
+- [质疑点]
+
+## 我的笔记
+
+[用户阅读后手动补充的内容]
+
+## 相关论文
+- [[相关论文1]] - [对比关系]
+- [[相关论文2]] - [对比关系]
+- [[相关论文3]] - [对比关系]
+
+## 外部资源
+- [论文链接]
+- [代码链接（如果有）]
+- [项目主页（如果有）]
+- [相关资源]
+'''
+
+
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%H:%M:%S',
+        stream=sys.stderr,
+    )
+
+    parser = argparse.ArgumentParser(description='生成论文分析笔记')
+    parser.add_argument('--paper-id', type=str, default='[PAPER_ID]', help='论文 arXiv ID')
+    parser.add_argument('--title', type=str, default='[论文标题]', help='论文标题')
+    parser.add_argument('--authors', type=str, default='[Authors]', help='论文作者')
+    parser.add_argument('--domain', type=str, default='其他', help='论文领域')
+    parser.add_argument('--vault', type=str, default=None, help='Obsidian vault 路径')
+    parser.add_argument('--output', type=Path, help='新笔记的输出路径；拒绝覆盖已有文件')
+    args = parser.parse_args()
+
+    date = datetime.now().strftime("%Y-%m-%d")
+    paper_title_safe = args.title
+    for ch in ' /\\:*?"<>|':
+        paper_title_safe = paper_title_safe.replace(ch, "_")
+
+    if args.output:
+        note_path = args.output
+    else:
+        vault_root = get_vault_path(args.vault)
+        note_path = Path(vault_root) / "20_Research" / "Papers" / args.domain / f"{paper_title_safe}.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    content = generate_note_content(args.paper_id, args.title, args.authors, args.domain, date)
+
+    try:
+        with open(note_path, 'x', encoding='utf-8') as f:
+            f.write(content)
+    except FileExistsError:
+        parser.exit(1, f'拒绝覆盖已有笔记: {note_path}。请用 --output 指定新路径。\n')
+
+    print(f"笔记已生成: {note_path}")
+    print(f"请手动编辑笔记内容，替换占位符为实际分析结果")
+
+
+if __name__ == '__main__':
+    main()
