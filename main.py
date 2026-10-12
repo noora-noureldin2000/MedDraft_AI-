@@ -125,6 +125,25 @@ def main(
         evidence_parts.append(f"{idx}. {p.get('title')} ({p.get('year')}) - {p.get('journal')} [DOI: {p.get('doi')}]")
     evidence_summary = "\n".join(evidence_parts)
 
+    # --- Step 1b: Automatic ClinicalTrials.gov enrichment ---
+    # The medical-clinicaltrials skill routes itself: bounded lookup only when
+    # the topic carries clinical signals (trial/phase/randomized/NCT...).
+    try:
+        from meddraft_ai.search.clinicaltrials import should_include_trials
+        if should_include_trials(topic):
+            trials = orchestrator.search_trials(query=topic, limit=5)
+            console.print(f"  Found [green]{len(trials)}[/green] registered trial(s) on ClinicalTrials.gov.")
+            for t in trials:
+                evidence_parts.append(
+                    f"T. {t.get('title')} [{t.get('phase')}; {t.get('status')}] "
+                    f"NCT: {t.get('nct_id')} {t.get('url')}"
+                )
+            evidence_summary = "\n".join(evidence_parts)
+        else:
+            console.print("  No clinical-trial signals in topic; skipping ClinicalTrials.gov lookup.")
+    except Exception as exc:
+        console.print(f"  [yellow]ClinicalTrials.gov lookup skipped: {exc}[/yellow]")
+
     # --- Step 2: PDF Ingestion (if provided) ---
     if pdf_input and Path(pdf_input).exists():
         console.print("\n[bold blue]Phase 2: Extracting Text & Metadata from PDF Input[/bold blue]")

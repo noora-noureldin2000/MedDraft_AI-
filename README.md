@@ -115,6 +115,13 @@ python -m meddraft_ai refs download "{\"title\": \"Paper Title\", \"pdf_url\": \
 # Trace nested/secondary citations in a PDF or excerpt to root sources (dual attribution)
 python -m meddraft_ai refs secondary-cite ./sample_paper.pdf --style Harvard
 python -m meddraft_ai refs secondary-cite "GLUT4 translocation is blunted [28]. References 28. Roden M, et al. J Clin Invest. 1996;97:2859-65." --markdown
+
+# Filtered ClinicalTrials.gov search + full record by NCT ID
+python -m meddraft_ai refs trials-search --condition "multiple sclerosis" --phase "Phase 3" --status Recruiting --limit 5
+python -m meddraft_ai refs trials-get NCT04368728
+
+# Draft structured Scholar search angles for a topic (search playbook)
+python -m meddraft_ai refs plan-angles "SGLT2 inhibitors renal outcomes"
 ```
 
 Low-level DOM navigation (mapped `data-agent-id`) is available through the compiled browser engine directly:
@@ -139,15 +146,20 @@ The repo carries two skill layers, both wired into the project's "brain":
 | `docs-guard` | Reactive review of generated/changed documentation |
 | `thesis-master-guide` | Cairo University Faculty of Dentistry Master Thesis formatting and content guide (27-component order, margins, spacing, reference style) |
 | `secondary-citation-extractor` | Nested/secondary citation tracing: distinguishes container vs root authors, maps in-text keys to the bibliography, verifies via Crossref/PubMed/Scholar, emits dual `as cited in` attribution |
+| `medical-clinicaltrials` | Filtered ClinicalTrials.gov search (condition/intervention/phase/status) + full NCT-ID records for evidence tables and recruitment tracking (no API key) |
+| `citation-integrity` | Numbered sequential citations, academic-sources-only rule, and QA checklist for literature reviews and methodology sections |
+| `academic-search-agent` | Three-phase Scholar playbook: breadth angles → authoritative deep-reads → single-question iteration with word budgets |
 | `wp-guard` / `woo-guard` | WordPress / WooCommerce code review gates (kept from the shared guard-skills toolkit) |
 
-**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out `secondary-citation-extractor` automatically whenever the task text contains secondary signals (`as cited in`, nested/secondary citation language, dual bibliography requests). The pipeline likewise auto-runs it: `main.py` Phase 2b traces up to 5 secondary citations from any `--pdf-input`, and `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carries the skill context for LLM-grounded tracing.
+**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out skills automatically whenever the task text carries their signals (`as cited in` → `secondary-citation-extractor`; trial/phase/NCT language → `medical-clinicaltrials`; literature-review/numbered-citation language → `citation-integrity`; background/timeline/research-log language → `academic-search-agent`). The pipeline likewise auto-runs them: `main.py` Phase 1 adds a bounded ClinicalTrials.gov lookup for clinical topics and Phase 2b traces secondary citations from any `--pdf-input`; `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `TrialsSpecialist` / `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carry the skill contexts for LLM-grounded work, while `citation-integrity` feeds `CoreWriter`/`ProofReader` and `academic-search-agent` feeds `DeepResearchSpecialist`.
 
 **Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
 
-`academic-writing` · `academic_research_skills` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer`
+`academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer`
 
 Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically.
+
+**Evaluated but not integrated** (additive-only policy respected; reasons recorded): `kesslerio/academic-deep-research` is already covered by the repo's local `academic-deep-research` skill + `DeepResearchSpecialist`; `dayunyan/academic-writer` was rejected (VirusTotal Suspicious flag, requires 4–7 GB texlive + Linux + an external hub skill, while Pandoc/DOCX export already covers output); `nimhar/aclawdemy` was rejected (VirusTotal Suspicious, external agent-publishing platform with API registration — conflicts with the zero-hallucination clinical posture); `huaruoji/research-report` was rejected (VirusTotal + OpenClaw Suspicious flags, texlive/conda/CUDA requirements, overlaps the existing export + 5-pass SciWrite audit).
 
 ---
 

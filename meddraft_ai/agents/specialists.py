@@ -94,7 +94,8 @@ class CoreWriterSpecialist(BaseSpecialist):
             "sciwrite",
             "academic_research_skills",
             "medical_research_skills",
-            "claude_scientific_writer"
+            "claude_scientific_writer",
+            "citation-integrity",
         ])
 
 
@@ -132,18 +133,29 @@ class ProofReaderSpecialist(BaseSpecialist):
         super().__init__("PROOF_READER", [
             "proofreading",
             "sciwrite",
-            "academic_research_skills/academic-paper-reviewer"
+            "academic_research_skills/academic-paper-reviewer",
+            "citation-integrity",
         ])
 
 
 class ReferencesSpecialist(BaseSpecialist):
     def __init__(self):
-        super().__init__("REFERENCES", ["doi_reference_validator", "research_surfer"])
+        super().__init__("REFERENCES", ["doi_reference_validator", "research_surfer", "medical-clinicaltrials"])
+
+
+class TrialsSpecialist(BaseSpecialist):
+    """Filtered ClinicalTrials.gov search + NCT-ID deep dives.
+
+    Loaded automatically whenever the task text carries clinical-trial
+    signals (see SkillRegistry auto-routing for medical-clinicaltrials).
+    """
+    def __init__(self):
+        super().__init__("TRIALS", ["medical-clinicaltrials"])
 
 
 class DeepResearchSpecialist(BaseSpecialist):
     def __init__(self):
-        super().__init__("DEEP_RESEARCH", ["academic_research_skills/deep-research", "research_surfer"])
+        super().__init__("DEEP_RESEARCH", ["academic_research_skills/deep-research", "research_surfer", "academic-search-agent"])
 
 
 class AcademicPaperSpecialist(BaseSpecialist):

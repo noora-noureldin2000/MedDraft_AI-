@@ -26,12 +26,16 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "docx",                 # Phase 2: newly registered
     "thesis-discussion-writer",
     "secondary-citation-extractor",  # Nested/secondary citation tracing + dual attribution
+    "medical-clinicaltrials",  # Filtered ClinicalTrials.gov search + NCT lookup
+    "citation-integrity",  # Numbered-citation discipline for lit reviews & methods
+    "academic-search-agent",  # 3-phase Scholar search playbook (breadth → deep-read → iterate)
 ]
 
 # Skill name → trigger phrases used by match_skill_for_task() for automatic
 # routing. The secondary-citation-extractor entry delegates scoring to its
 # code layer (SecondaryCitationExtractor.match_score) via lazy import so the
-# registry stays dependency-light and import-cycle free.
+# registry stays dependency-light and import-cycle free. The clinical-trials
+# entry likewise delegates to clinicaltrials.should_include_trials.
 AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
     "secondary-citation-extractor": [
         "as cited in",
@@ -43,6 +47,30 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "root author",
         "container author",
         "resolve reference",
+    ],
+    "medical-clinicaltrials": [
+        "clinical trial",
+        "clinical trials",
+        "nct id",
+        "recruiting trial",
+        "trial phase",
+        "trial status",
+    ],
+    "citation-integrity": [
+        "literature review",
+        "methodology section",
+        "numbered citation",
+        "citation integrity",
+        "verifiable reference",
+        "prohibited source",
+    ],
+    "academic-search-agent": [
+        "background literature",
+        "timeline of key papers",
+        "seminal paper",
+        "cited reference list",
+        "research log",
+        "breadth search",
     ],
 }
 
@@ -133,17 +161,15 @@ class SkillRegistry:
     def match_skill_for_task(self, task_text: str) -> str | None:
         """Automatically route a task description to the most relevant skill.
 
-        The secondary-citation-extractor skill is called out automatically
-        when the task looks like nested/secondary citation work (``as cited
-        in``, bracket/author-date markers plus bibliography language). Other
-        skills fall back to simple keyword overlap so routing stays generic.
+        Dedicated code-layer scorers run first (secondary-citation-extractor,
+        medical-clinicaltrials); remaining packs fall back to keyword overlap.
 
         Returns the skill/pack name (e.g. ``"secondary-citation-extractor"``)
         or ``None`` when nothing matches confidently.
         """
         if not task_text:
             return None
-        # Dedicated scorer for the citation skill — lazy import, no cycle.
+        # Dedicated scorers — lazy imports, no cycles.
         try:
             from meddraft_ai.extraction.secondary_citation import (
                 SecondaryCitationExtractor,
@@ -152,12 +178,18 @@ class SkillRegistry:
                 return SecondaryCitationExtractor.skill_name
         except ImportError:
             pass
+        try:
+            from meddraft_ai.search.clinicaltrials import should_include_trials
+            if should_include_trials(task_text):
+                return "medical-clinicaltrials"
+        except ImportError:
+            pass
 
         lowered = task_text.lower()
         best_name: str | None = None
         best_score = 0
         for skill_name, keywords in AUTO_ROUTE_KEYWORDS.items():
-            if skill_name == "secondary-citation-extractor":
+            if skill_name in ("secondary-citation-extractor", "medical-clinicaltrials"):
                 continue  # already handled above
             score = sum(1 for kw in keywords if kw in lowered)
             if score > best_score:

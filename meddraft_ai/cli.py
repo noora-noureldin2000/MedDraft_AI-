@@ -59,6 +59,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the skill's dual-attribution Markdown template instead of JSON.",
     )
 
+    trials = refs_sub.add_parser(
+        "trials-search",
+        help="Filtered ClinicalTrials.gov search (condition/intervention/phase/status).",
+    )
+    trials.add_argument("--condition", default="", help="Disease/condition filter.")
+    trials.add_argument("--intervention", default="", help="Drug/treatment filter.")
+    trials.add_argument("--phase", default="", help="Trial phase filter (e.g. 'Phase 3').")
+    trials.add_argument("--status", default="", help="Status filter (e.g. 'Recruiting').")
+    trials.add_argument("--term", default="", help="Free-text query term.")
+    trials.add_argument("--limit", type=int, default=10, help="Max results (default 10).")
+
+    trial_get = refs_sub.add_parser(
+        "trials-get", help="Full ClinicalTrials.gov record by NCT ID."
+    )
+    trial_get.add_argument("nct_id", help="NCT identifier, e.g. NCT04368728.")
+
+    angles = refs_sub.add_parser(
+        "plan-angles",
+        help="Draft 3-5 structured Scholar search angles for a topic (search playbook).",
+    )
+    angles.add_argument("query", help="Research topic string.")
+
     return parser
 
 
@@ -124,8 +146,26 @@ def main(argv: Optional[List[str]] = None) -> int:
                      "results": [c.to_dict() for c in traced]},
                     indent=2, default=str,
                 ))
+        elif args.refs_command == "trials-search":
+            results = orchestrator.search_trials(
+                query=args.term,
+                condition=args.condition,
+                intervention=args.intervention,
+                phase=args.phase,
+                status=args.status,
+                limit=args.limit,
+            )
+            print(json.dumps({"success": True, "count": len(results), "results": results}, indent=2))
+        elif args.refs_command == "trials-get":
+            print(json.dumps(orchestrator.get_trial(args.nct_id), indent=2))
+        elif args.refs_command == "plan-angles":
+            from meddraft_ai.search.search_planner import plan_search_angles
+            print(json.dumps(
+                {"success": True, "angles": plan_search_angles(args.query)},
+                indent=2,
+            ))
         else:
-            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive, download or secondary-cite."}, indent=2))
+            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive, download, secondary-cite, trials-search, trials-get or plan-angles."}, indent=2))
             return 1
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))

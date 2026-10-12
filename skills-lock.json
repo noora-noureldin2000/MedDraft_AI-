@@ -49,6 +49,21 @@
       "sourceType": "local",
       "computedHash": "d0e2e514fe3240c91a3d7c4e81f59fe1a6b6688ad1b92ccfeb716d596cc85cc6"
     },
+    "medical-clinicaltrials": {
+      "source": "./.agents/skills/medical-clinicaltrials",
+      "sourceType": "local",
+      "computedHash": "e2f699c2e44521c459e4cb51749169b8760631354b60dc2cb2ab35d45458ae6c"
+    },
+    "citation-integrity": {
+      "source": "./.agents/skills/citation-integrity",
+      "sourceType": "local",
+      "computedHash": "1d52c2ea8585ba001a837bef8b6d48f3f4400dd68b0d50fd861e8aeb393c4641"
+    },
+    "academic-search-agent": {
+      "source": "./.agents/skills/academic-search-agent",
+      "sourceType": "local",
+      "computedHash": "a97b065b1212c0c3b98598d7bdec98f9963b2ffff624c62bdd5fa62b191d93b7"
+    },
     "woo-guard": {
       "source": "amElnagdy/guard-skills",
       "sourceType": "github",

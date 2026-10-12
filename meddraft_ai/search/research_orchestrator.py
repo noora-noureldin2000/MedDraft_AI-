@@ -100,6 +100,47 @@ class ResearchOrchestrator:
             return res.get("results", [])
         return []
 
+    def search_trials(
+        self,
+        query: str = "",
+        condition: str = "",
+        intervention: str = "",
+        phase: str = "",
+        status: str = "",
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Filtered ClinicalTrials.gov lookup (medical-clinicaltrials skill).
+
+        Free-text *query* maps to ``query.term``; explicit condition /
+        intervention / phase / status filters map to the API's fielded query.
+        Never raises — returns [] when the API is unreachable.
+        """
+        from meddraft_ai.search.clinicaltrials import search_studies
+        try:
+            res = search_studies(
+                condition=condition,
+                intervention=intervention,
+                phase=phase,
+                status=status,
+                # Bare free-text query maps to query.term; fielded filters
+                # combine with it (AND) when both are present.
+                term=query,
+                limit=limit,
+            )
+            return res.get("results", []) if res.get("success") else []
+        except Exception as e:
+            logger.warning(f"ClinicalTrials.gov lookup failed: {e}")
+            return []
+
+    def get_trial(self, nct_id: str) -> Dict[str, Any]:
+        """Full trial record by NCT ID. Never raises — returns success=False on failure."""
+        from meddraft_ai.search.clinicaltrials import get_study
+        try:
+            return get_study(nct_id)
+        except Exception as e:
+            logger.warning(f"ClinicalTrials.gov fetch failed: {e}")
+            return {"success": False, "error": str(e), "study": {}}
+
     def deep_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Unified, deduplicated search across primary and secondary databases."""
         papers = []
