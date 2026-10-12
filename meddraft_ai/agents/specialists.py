@@ -165,6 +165,7 @@ class CoreWriterSpecialist(BaseSpecialist):
             "medical_research_skills",
             "claude_scientific_writer",
             "citation-integrity",
+            "surgical-word-reduction",
             # Nature layer: structural revision + figure logic + review articles.
             "manuscript-optimizer/SKILL.md",
             "results-section-revision/SKILL.md",
@@ -217,6 +218,7 @@ class ProofReaderSpecialist(BaseSpecialist):
             "sciwrite",
             "academic_research_skills/academic-paper-reviewer",
             "citation-integrity",
+            "surgical-word-reduction",
             # Nature layer: sentence lint, de-auditing, clarity/logic diagnosis.
             "scientific-prose-style/SKILL.md",
             "anti-defensive-writing/SKILL.md",

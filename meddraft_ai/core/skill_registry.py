@@ -30,6 +30,7 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "medical-clinicaltrials",  # Filtered ClinicalTrials.gov search + NCT lookup
     "citation-integrity",  # Numbered-citation discipline for lit reviews & methods
     "academic-search-agent",  # 3-phase Scholar search playbook (breadth → deep-read → iterate)
+    "surgical-word-reduction",  # 3-pass surgical word-count reduction (structure → syntax → micro-polish)
     # Nature Paper Skills layer (20 vendored skills + manifest; see
     # meddraft_ai/core/nature_integration.py and prompts/nature-paper-skills/).
     "claim-source-verification",
@@ -95,6 +96,14 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "cited reference list",
         "research log",
         "breadth search",
+    ],
+    "surgical-word-reduction": [
+        "reduce word count",
+        "word limit",
+        "over word limit",
+        "shorten manuscript",
+        "tighten prose",
+        "concise revision",
     ],
     # Nature Paper Skills triggers (single source of truth in nature_integration).
     **_NATURE_TRIGGERS,

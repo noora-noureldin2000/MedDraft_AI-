@@ -175,6 +175,11 @@
       "source": "./.agents/skills/write-scientific-manuscript",
       "sourceType": "local",
       "computedHash": "d23cbde8bc2878fe7bd6c2fc332f77dbab23b919492235409dafb1d14548ca45"
+    },
+    "surgical-word-reduction": {
+      "source": "./.agents/skills/surgical-word-reduction",
+      "sourceType": "local",
+      "computedHash": "9549f3f9ec9f847d89910c8737a3fe1ebc0550248561683cae09fa6288aa27ce"
     }
   }
 }
