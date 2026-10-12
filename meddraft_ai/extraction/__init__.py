@@ -7,6 +7,12 @@ test_pdf.py (which only needs PDFReader) and test_skill_registry.py can
 run without the native library loaded.
 """
 from .citation_tracker import CitationTracker
+from .secondary_citation import (
+    SecondaryCitationExtractor,
+    SecondaryCitation,
+    ContainerSource,
+    RootSource,
+)
 from .extraction_engine import ExtractionEngine
 from .pdf_reader import PDFReader, read_pdf
 from .pdf_annotator import PDFAnnotator, highlight_pdf
@@ -24,6 +30,10 @@ except Exception:  # noqa: BLE001  — native-lib crash guard
 __all__ = [
     "DocumentConverter",
     "CitationTracker",
+    "SecondaryCitationExtractor",
+    "SecondaryCitation",
+    "ContainerSource",
+    "RootSource",
     "ExtractionEngine",
     "PDFReader",
     "read_pdf",

@@ -8,6 +8,7 @@ console = Console()
 
 from meddraft_ai.extraction.converter import DocumentConverter
 from meddraft_ai.extraction.citation_tracker import CitationVerifier
+from meddraft_ai.extraction.secondary_citation import SecondaryCitationExtractor
 
 class ExtractionEngine:
     """Orchestrates PDF ingestion, variable extraction, citation verification,
@@ -30,10 +31,25 @@ class ExtractionEngine:
         citation_meta = self.converter.extract_citation_metadata()
         verified_citations = CitationVerifier.extract_and_verify(self.doc_text)
 
+        # Automatic secondary/nested citation tracing (skill auto-routing:
+        # only runs when the text actually contains traceable markers).
+        secondary_citations: list[dict] = []
+        try:
+            if SecondaryCitationExtractor.should_trigger(self.doc_text):
+                traced = SecondaryCitationExtractor.extract(
+                    self.doc_text,
+                    container_meta=citation_meta,
+                    max_claims=10,
+                )
+                secondary_citations = [c.to_dict() for c in traced]
+        except Exception as exc:
+            console.print(f"[yellow]Secondary citation tracing skipped: {exc}[/yellow]")
+
         return {
             "study_id": self.pdf_path.stem,
             "markdown_path": str(self.markdown_path),
             "text_snippet": self.doc_text[:2000],
             "metadata": citation_meta,
-            "verified_citations": [c.to_dict() for c in verified_citations]
+            "verified_citations": [c.to_dict() for c in verified_citations],
+            "secondary_citations": secondary_citations,
         }

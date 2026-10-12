@@ -44,6 +44,11 @@
       "sourceType": "local",
       "computedHash": "9dd146a072a4252980cf06e4cde0289ce8a5dcd678af47077e093eedd8a30dad"
     },
+    "secondary-citation-extractor": {
+      "source": "./.agents/skills/secondary-citation-extractor",
+      "sourceType": "local",
+      "computedHash": "d0e2e514fe3240c91a3d7c4e81f59fe1a6b6688ad1b92ccfeb716d596cc85cc6"
+    },
     "woo-guard": {
       "source": "amElnagdy/guard-skills",
       "sourceType": "github",

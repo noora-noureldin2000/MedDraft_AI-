@@ -33,11 +33,11 @@ graph LR
 
 ## Module Structure
 
-- `meddraft_ai.core`: Configuration management, LLM interface, provider routing, and the `SkillRegistry` that indexes prompt packs.
+- `meddraft_ai.core`: Configuration management, LLM interface, provider routing, and the `SkillRegistry` that indexes prompt packs. `SkillRegistry.match_skill_for_task()` auto-routes task text to the most relevant skill (notably `secondary-citation-extractor` on `as cited in` / nested-citation signals); `get_skill_with_auto_routing()` falls back to routing when an exact name lookup fails.
 - `meddraft_ai.search`: Multi-database APIs and Playwright stealth browser engine for Google Scholar.
-- `meddraft_ai.extraction`: Docling-based text/table extraction, PDF reading, page-level citation anchoring.
+- `meddraft_ai.extraction`: Docling-based text/table extraction, PDF reading, page-level citation anchoring, plus `secondary_citation.SecondaryCitationExtractor` (4-step container→trace→verify→dual-attribution pipeline, auto-triggered by `ExtractionEngine` and `main.py` Phase 2b).
 - `meddraft_ai.screening`: PICO abstract/fulltext screening, RIS/CSV parsing, PRISMA flow diagrams.
-- `meddraft_ai.agents`: CoreWriter, Humanizer, VerifierAndStats, ProofReader, MedicalWriterAgent.
+- `meddraft_ai.agents`: CoreWriter, Humanizer, VerifierAndStats, ProofReader, MedicalWriterAgent, plus `SecondaryCitationSpecialist` (carries the secondary-citation-extractor skill context for LLM-grounded tracing).
 - `meddraft_ai.validation`: Live CrossRef and PubMed reference verification.
 - `meddraft_ai.export`: Python-docx and Pandoc Markdown-to-DOCX conversion with publisher styles.
 
@@ -45,5 +45,5 @@ graph LR
 
 Two skill layers feed the system:
 
-- **Pipeline prompt packs** live in `meddraft_ai/prompts/`. The `SkillRegistry` (`meddraft_ai/core/skill_registry.py`) indexes every `.md`/`.txt` file at runtime; a new pack only needs its folder name added to `REGISTERED_PROMPT_SUBDIRS` in that module.
-- **Agent skills** live in `.agents/skills/` (guard skills for code/test/docs review plus the `thesis-master-guide` compliance skill). They are pinned in `skills-lock.json` (`npx skills` lockfile format); `tests/test_skills_lock.py` enforces that every installed skill directory has a lock entry.
+- **Pipeline prompt packs** live in `meddraft_ai/prompts/`. The `SkillRegistry` (`meddraft_ai/core/skill_registry.py`) indexes every `.md`/`.txt` file at runtime; a new pack only needs its folder name added to `REGISTERED_PROMPT_SUBDIRS` in that module. `secondary-citation-extractor/` is registered there and additionally wired for automatic invocation via `AUTO_ROUTE_KEYWORDS` + `match_skill_for_task()`.
+- **Agent skills** live in `.agents/skills/` (guard skills for code/test/docs review plus the `thesis-master-guide` compliance skill and the `secondary-citation-extractor` tracing skill). They are pinned in `skills-lock.json` (`npx skills` lockfile format); `tests/test_skills_lock.py` enforces that every installed skill directory has a lock entry.

@@ -36,6 +36,29 @@ def build_parser() -> argparse.ArgumentParser:
     download.add_argument("paper", help='JSON string: {"title": "...", "pdf_url": "..."}')
     download.add_argument("--output", default=None, help="Optional output directory.")
 
+    secondary = refs_sub.add_parser(
+        "secondary-cite",
+        help="Trace nested/secondary citations in a PDF or excerpt to root sources.",
+    )
+    secondary.add_argument(
+        "input",
+        help="Path to a PDF file, or a raw text excerpt containing a cited claim.",
+    )
+    secondary.add_argument(
+        "--style",
+        default="Harvard",
+        choices=["Harvard", "Vancouver"],
+        help="Dual-attribution citation style (default: Harvard).",
+    )
+    secondary.add_argument(
+        "--max", type=int, default=10, help="Max claims to trace (default 10)."
+    )
+    secondary.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Emit the skill's dual-attribution Markdown template instead of JSON.",
+    )
+
     return parser
 
 
@@ -66,8 +89,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.refs_command == "download":
             result = orchestrator.download(args.paper, output_dir=args.output)
             print(json.dumps(result, indent=2))
+        elif args.refs_command == "secondary-cite":
+            from pathlib import Path
+            from meddraft_ai.extraction.secondary_citation import (
+                SecondaryCitationExtractor,
+            )
+            source = args.input
+            candidate = Path(source)
+            if candidate.exists() and candidate.suffix.lower() == ".pdf":
+                from meddraft_ai.extraction.pdf_reader import PDFReader
+                text = PDFReader(candidate).read_text()
+                meta: dict = {}
+                try:
+                    meta = PDFReader(candidate).extract_metadata()
+                except Exception:
+                    meta = {}
+                container_meta = {"title": meta.get("title", ""), "author": meta.get("author", "")}
+            else:
+                text = source
+                container_meta = {}
+            traced = SecondaryCitationExtractor.extract(
+                text,
+                container_meta=container_meta,
+                citation_style=args.style,
+                max_claims=args.max,
+            )
+            if args.markdown:
+                print(SecondaryCitationExtractor.extract_to_markdown(
+                    text, container_meta, args.style, args.max
+                ))
+            else:
+                print(json.dumps(
+                    {"success": True, "count": len(traced),
+                     "results": [c.to_dict() for c in traced]},
+                    indent=2, default=str,
+                ))
         else:
-            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive or download."}, indent=2))
+            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive, download or secondary-cite."}, indent=2))
             return 1
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))

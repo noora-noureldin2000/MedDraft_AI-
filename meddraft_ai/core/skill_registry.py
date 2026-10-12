@@ -25,7 +25,26 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "pdf",                  # Phase 2: newly registered
     "docx",                 # Phase 2: newly registered
     "thesis-discussion-writer",
+    "secondary-citation-extractor",  # Nested/secondary citation tracing + dual attribution
 ]
+
+# Skill name → trigger phrases used by match_skill_for_task() for automatic
+# routing. The secondary-citation-extractor entry delegates scoring to its
+# code layer (SecondaryCitationExtractor.match_score) via lazy import so the
+# registry stays dependency-light and import-cycle free.
+AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
+    "secondary-citation-extractor": [
+        "as cited in",
+        "secondary citation",
+        "secondary source",
+        "nested citation",
+        "dual bibliography",
+        "trace citation",
+        "root author",
+        "container author",
+        "resolve reference",
+    ],
+}
 
 
 class SkillRegistry:
@@ -110,3 +129,63 @@ class SkillRegistry:
             f"Skill '{name}' not found in registry. "
             f"Available: {[s['name'] for s in self.skills]}"
         )
+
+    def match_skill_for_task(self, task_text: str) -> str | None:
+        """Automatically route a task description to the most relevant skill.
+
+        The secondary-citation-extractor skill is called out automatically
+        when the task looks like nested/secondary citation work (``as cited
+        in``, bracket/author-date markers plus bibliography language). Other
+        skills fall back to simple keyword overlap so routing stays generic.
+
+        Returns the skill/pack name (e.g. ``"secondary-citation-extractor"``)
+        or ``None`` when nothing matches confidently.
+        """
+        if not task_text:
+            return None
+        # Dedicated scorer for the citation skill — lazy import, no cycle.
+        try:
+            from meddraft_ai.extraction.secondary_citation import (
+                SecondaryCitationExtractor,
+            )
+            if SecondaryCitationExtractor.should_trigger(task_text):
+                return SecondaryCitationExtractor.skill_name
+        except ImportError:
+            pass
+
+        lowered = task_text.lower()
+        best_name: str | None = None
+        best_score = 0
+        for skill_name, keywords in AUTO_ROUTE_KEYWORDS.items():
+            if skill_name == "secondary-citation-extractor":
+                continue  # already handled above
+            score = sum(1 for kw in keywords if kw in lowered)
+            if score > best_score:
+                best_score = score
+                best_name = skill_name
+        if best_score >= 2:
+            return best_name
+
+        # Generic fallback: keyword overlap against indexed skill contents.
+        if self.skills:
+            scored: list[tuple[int, str]] = []
+            task_words = set(re.findall(r"\b[a-z]{3,15}\b", lowered))
+            for skill in self.skills:
+                overlap = len(task_words & set(skill.get("keywords", [])))
+                if overlap:
+                    scored.append((overlap, skill["name"]))
+            if scored:
+                scored.sort(reverse=True)
+                if scored[0][0] >= 3:
+                    return scored[0][1]
+        return None
+
+    def get_skill_with_auto_routing(self, name_or_task: str) -> str:
+        """Get a skill by exact name, falling back to automatic routing."""
+        try:
+            return self.get_skill(name_or_task)
+        except ValueError:
+            routed = self.match_skill_for_task(name_or_task)
+            if routed:
+                return self.get_skill(routed)
+            raise

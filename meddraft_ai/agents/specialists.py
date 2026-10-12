@@ -154,3 +154,26 @@ class AcademicPaperSpecialist(BaseSpecialist):
 class MedPaperAssistantSpecialist(BaseSpecialist):
     def __init__(self):
         super().__init__("MED_PAPER_ASSISTANT", ["med_paper_assistant", "medical_research_skills"])
+
+
+class SecondaryCitationSpecialist(BaseSpecialist):
+    """Traces nested/secondary citations to their root study and emits dual
+    ``as cited in`` attribution. Loaded automatically whenever the task text
+    matches the secondary-citation-extractor skill (see SkillRegistry).
+    """
+    def __init__(self):
+        super().__init__("SECONDARY_CITATION", ["secondary-citation-extractor"])
+
+    def trace(self, excerpt_or_pdf_text: str) -> str:
+        from meddraft_ai.extraction.secondary_citation import (
+            SecondaryCitationExtractor,
+        )
+        markdown = SecondaryCitationExtractor.extract_to_markdown(excerpt_or_pdf_text)
+        return self.execute(
+            "Apply the secondary-citation-extractor skill workflow to the text below. "
+            "Distinguish the container author from the root author, trace each "
+            "in-text key to the bibliography, and emit the dual-attribution output "
+            "template (do not invent metadata).\n\n"
+            f"PRE-EXTRACTED DUAL CITATIONS:\n{markdown}\n\n"
+            f"SOURCE TEXT:\n{excerpt_or_pdf_text[:6000]}"
+        )

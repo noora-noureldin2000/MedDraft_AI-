@@ -111,6 +111,10 @@ python -m meddraft_ai refs deep-dive "10.1038/nature12373"   # DOI, PMID, or JSO
 
 # Download an open-access PDF to outputs/downloaded_papers/
 python -m meddraft_ai refs download "{\"title\": \"Paper Title\", \"pdf_url\": \"https://example.com/paper.pdf\"}"
+
+# Trace nested/secondary citations in a PDF or excerpt to root sources (dual attribution)
+python -m meddraft_ai refs secondary-cite ./sample_paper.pdf --style Harvard
+python -m meddraft_ai refs secondary-cite "GLUT4 translocation is blunted [28]. References 28. Roden M, et al. J Clin Invest. 1996;97:2859-65." --markdown
 ```
 
 Low-level DOM navigation (mapped `data-agent-id`) is available through the compiled browser engine directly:
@@ -134,11 +138,14 @@ The repo carries two skill layers, both wired into the project's "brain":
 | `test-guard` | Reactive review of generated/changed test code |
 | `docs-guard` | Reactive review of generated/changed documentation |
 | `thesis-master-guide` | Cairo University Faculty of Dentistry Master Thesis formatting and content guide (27-component order, margins, spacing, reference style) |
+| `secondary-citation-extractor` | Nested/secondary citation tracing: distinguishes container vs root authors, maps in-text keys to the bibliography, verifies via Crossref/PubMed/Scholar, emits dual `as cited in` attribution |
 | `wp-guard` / `woo-guard` | WordPress / WooCommerce code review gates (kept from the shared guard-skills toolkit) |
+
+**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out `secondary-citation-extractor` automatically whenever the task text contains secondary signals (`as cited in`, nested/secondary citation language, dual bibliography requests). The pipeline likewise auto-runs it: `main.py` Phase 2b traces up to 5 secondary citations from any `--pdf-input`, and `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carries the skill context for LLM-grounded tracing.
 
 **Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
 
-`academic-writing` · `academic_research_skills` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `thesis-discussion-writer`
+`academic-writing` · `academic_research_skills` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer`
 
 Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically.
 

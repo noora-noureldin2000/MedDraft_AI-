@@ -133,6 +133,39 @@ def main(
         evidence_summary += f"\n\nPDF INPUT TEXT SNIPPET:\n{pdf_text[:3000]}"
         console.print(f"  Extracted text from [green]{Path(pdf_input).name}[/green]")
 
+        # --- Step 2b: Automatic secondary/nested citation tracing ---
+        # The secondary-citation-extractor skill routes itself: it only runs
+        # when the PDF text contains traceable secondary markers (as cited in,
+        # bracket/author-date keys + bibliography language).
+        try:
+            from meddraft_ai.extraction.secondary_citation import (
+                SecondaryCitationExtractor,
+            )
+            if SecondaryCitationExtractor.should_trigger(pdf_text):
+                traced = SecondaryCitationExtractor.extract(
+                    pdf_text,
+                    container_meta=reader.extract_metadata(),
+                    citation_style=citation_style,
+                    max_claims=5,
+                )
+                console.print(
+                    f"  Traced [green]{len(traced)}[/green] secondary citation(s) "
+                    f"to root sources (dual attribution)."
+                )
+                for item in traced:
+                    evidence_summary += (
+                        f"\n\nSECONDARY CITATION: {item.in_text_attribution()}\n"
+                        f"Claim: {item.claim[:400]}\n"
+                        f"Root: {', '.join(item.root.authors) or '?'} — "
+                        f"{item.root.title or '?'} "
+                        f"({item.root.year or 'n.d.'})"
+                        f"{' DOI:' + item.root.doi if item.root.doi else ''}"
+                    )
+            else:
+                console.print("  No secondary/nested citation markers detected; skipping dual tracing.")
+        except Exception as exc:
+            console.print(f"  [yellow]Secondary citation tracing skipped: {exc}[/yellow]")
+
     # --- Step 3: Statistical Results Reporting (if data file provided) ---
     stats_narrative = ""
     if data_file and Path(data_file).exists():
