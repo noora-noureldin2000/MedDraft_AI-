@@ -5,7 +5,7 @@ CRITICAL ZERO-HALLUCINATION RULES:
 1. SOURCE OF TRUTH: Extract ONLY from the provided document text chunks and structured tables. Never use outside clinical knowledge.
 2. VERBATIM QUOTES: For every field marked "REPORTED", `verbatim_quote` MUST be an exact character-for-character substring from the text or table markdown. NEVER paraphrase, NEVER insert "..." or ellipses, and NEVER stitch separate non-contiguous sentences together.
 3. NUMERIC FIDELITY: Every single integer, decimal, percentage, confidence interval, and p-value inside `value` MUST appear identically in `verbatim_quote` or the referenced Table ID. Do NOT round (e.g. if text says "p = 0.048", do NOT write "0.05"). Do NOT mentally compute percentages, sums, or risk ratios.
-4. MISSING DATA: If a field is not explicitly stated in the provided text, you MUST set `status="NOT_REPORTED"`, `value=None`, and `verbatim_quote=None`.
+4. MISSING DATA & ANTI-EVASION: If a field is not explicitly stated in the provided text, you MUST set `status="NOT_REPORTED"`, `value=None`, and `verbatim_quote=None`. Do NOT use `status="UNCLEAR"` to avoid finding quotes — `UNCLEAR` is strictly reserved for citing contradictory statements where two sections explicitly disagree.
 5. SEMANTIC INTERPRETATION: Use `semantic_interpretation` to explain clinical context (e.g., standardizing dosing frequencies, defining trial acronyms, or noting ITT vs per-protocol population).
 """.strip()
 
@@ -47,10 +47,12 @@ DISCUSSION INSTRUCTIONS:
 - `funding_and_conflicts`: Extract grant numbers, commercial sponsors, or conflict disclosures. If missing, set status="NOT_REPORTED".
 """.strip()
 
-SYNTHESIS_SYSTEM_PROMPT = """
+SYNTHESIS_SYSTEM_PROMPT = f"""
 You are a Clinical Trial Auditor conducting an internal cross-section consistency check.
 Evaluate the verified extractions from Methods, Results, and Discussion:
 1. Denominator Consistency: Does enrolled N in Methods match analyzed N and outcome denominators in Results (accounting for reported attrition)?
 2. Reporting Bias: Are primary outcomes stated in Methods fully accounted for in Results?
-Be objective, rigorous, and concise.
+3. `discrepancy_evidence`: If no discrepancy exists, set `status="NOT_REPORTED"`, `value=None`, and `verbatim_quote=None`. If an unexplained discrepancy exists, set `status="REPORTED"` and provide an exact `verbatim_quote` and `page_number` illustrating the contradiction.
+
+{CORE_GROUNDING_RULES}
 """.strip()

@@ -102,11 +102,17 @@ class CrossSectionAudit(BaseModel):
     sample_size_consistent: bool = Field(
         description="True if enrolled N in Methods aligns with analyzed N and Table denominators."
     )
-    discrepancy_notes: Optional[str] = Field(
-        default=None,
-        description="Detailed explanation of any denominator shifts, attrition discrepancies, or outcome switching."
+    discrepancy_evidence: GroundedField[str] = Field(
+        description=(
+            "Verbatim quote and explanation of any discrepancy found in sample sizes, "
+            "dropouts, or outcome switching. Set status='NOT_REPORTED' if no discrepancy exists."
+        )
     )
     overall_risk_of_reporting_bias: Literal["LOW", "MODERATE", "HIGH", "UNCLEAR"]
+    audit_notes: Optional[str] = Field(
+        default=None,
+        description="Brief summary of cross-section coherence."
+    )
 
 
 class StudyExtractionSchema(BaseModel):

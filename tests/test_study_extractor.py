@@ -227,3 +227,197 @@ def test_doi_fallback_does_not_return_verified_true():
     res = CitationVerifier.verify_doi("10.99999/unregistered.test.doi.12345")
     assert res.verified is False
     assert res.source in ("FORMAT_VALID_API_UNVERIFIED", "Not found on APIs")
+
+
+# ---------------------------------------------------------------------------
+# 6. Anti-Evasion UNCLEAR Tests
+# ---------------------------------------------------------------------------
+
+def test_unclear_without_quote_fails_verification(sample_pages):
+    verifier = GroundingVerifier(page_texts=sample_pages)
+    # LLM attempts to dodge finding a quote by setting status='UNCLEAR' with no quote
+    field = GroundedField[str](
+        status="UNCLEAR",
+        value="Possibly 120 patients",
+        verbatim_quote=None,
+    )
+    ok, err = verifier.verify_field("sample_size", field)
+    assert ok is False
+    assert field.verified_in_source is False
+    assert "rejected without source evidence" in err
+
+
+def test_unclear_with_verified_quote_accepted(sample_pages):
+    verifier = GroundingVerifier(page_texts=sample_pages)
+    # LLM legitimately marks UNCLEAR by citing an exact quote from page 1 demonstrating ambiguity
+    field = GroundedField[str](
+        status="UNCLEAR",
+        value=None,
+        verbatim_quote="We enrolled 240 patients with severe asthma.",
+        page_number=1,
+    )
+    ok, err = verifier.verify_field("sample_size", field)
+    assert ok is True
+    assert err is None
+    assert "Ambiguity documented from source" in (field.verification_note or "")
+
+
+# ---------------------------------------------------------------------------
+# 7. Write-Once PDF Annotation Tests
+# ---------------------------------------------------------------------------
+
+def test_save_annotated_pdf_batch_write(sample_pages):
+    class MockAnnotator:
+        def __init__(self):
+            self.calls = []
+
+        def highlight_sentences(self, sentences, output_path=None):
+            self.calls.append((sentences, output_path))
+            return str(output_path)
+
+    mock_annotator = MockAnnotator()
+    verifier = GroundingVerifier(page_texts=sample_pages, pdf_annotator=mock_annotator)
+
+    f1 = GroundedField[int](status="REPORTED", value=240, verbatim_quote="We enrolled 240 patients with severe asthma.", page_number=1)
+    f2 = GroundedField[str](status="REPORTED", value="oral Drug X", verbatim_quote="receive oral Drug X 50 mg twice daily", page_number=2)
+
+    verifier.verify_field("field1", f1)
+    verifier.verify_field("field2", f2)
+
+    # Verifier must NOT call highlight_sentences per-field
+    assert len(mock_annotator.calls) == 0
+    assert len(verifier.verified_quotes) == 2
+
+    # Writes once in a single batch pass
+    saved = verifier.save_annotated_pdf("final_annotated.pdf")
+    assert saved == "final_annotated.pdf"
+    assert len(mock_annotator.calls) == 1
+    assert len(mock_annotator.calls[0][0]) == 2
+
+
+# ---------------------------------------------------------------------------
+# 8. CrossSectionAudit Verification Tests
+# ---------------------------------------------------------------------------
+
+def test_cross_section_audit_verified_pass(sample_pages):
+    verifier = GroundingVerifier(page_texts=sample_pages)
+
+    # Valid audit: no discrepancy found, status is NOT_REPORTED
+    audit = CrossSectionAudit(
+        sample_size_consistent=True,
+        discrepancy_evidence=GroundedField[str](status="NOT_REPORTED", value=None),
+        overall_risk_of_reporting_bias="LOW",
+        audit_notes="Enrolled 240 aligns with 120 per arm."
+    )
+    errors = verifier.verify_model(audit)
+    assert len(errors) == 0
+    assert audit.discrepancy_evidence.verified_in_source is True
+
+    # Audit reporting discrepancy with hallucinated quote must fail verification
+    bad_audit = CrossSectionAudit(
+        sample_size_consistent=False,
+        discrepancy_evidence=GroundedField[str](
+            status="REPORTED",
+            value="Missing 50 patients",
+            verbatim_quote="50 patients vanished from results",
+            page_number=3
+        ),
+        overall_risk_of_reporting_bias="HIGH",
+    )
+    bad_errors = verifier.verify_model(bad_audit)
+    assert len(bad_errors) > 0
+    assert "Verbatim quote not found" in bad_errors[0]
+
+
+# ---------------------------------------------------------------------------
+# 9. Real End-to-End PDF Pipeline Test
+# ---------------------------------------------------------------------------
+
+def test_real_pdf_end_to_end(tmp_path):
+    import pypdf
+
+    # Create a real 2-page PDF on the fly
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+
+    pdf_file = tmp_path / "clinical_trial.pdf"
+    with open(pdf_file, "wb") as f:
+        writer.write(f)
+
+    # Supply controlled page texts to test extraction end-to-end
+    real_page_texts = {
+        1: "Abstract: We evaluated Drug Alpha in 100 participants with hypertension.",
+        2: "Methods: 100 participants were randomized. Results: Blood pressure reduced by 12 mmHg.",
+    }
+
+    verifier = GroundingVerifier(page_texts=real_page_texts)
+
+    def mock_llm_callable(sys_p: str, usr_p: str, schema_cls: type[BaseModel]) -> BaseModel:
+        if schema_cls == MethodsPassSchema:
+            return MethodsPassSchema(
+                study_design=GroundedField[str](status="REPORTED", value="RCT", verbatim_quote="randomized", page_number=2),
+                registration_id=GroundedField[str](status="NOT_REPORTED", value=None),
+                population_description=GroundedField[str](status="REPORTED", value="hypertension", verbatim_quote="participants with hypertension", page_number=1),
+                inclusion_criteria=GroundedField[List[str]](status="NOT_REPORTED", value=None),
+                exclusion_criteria=GroundedField[List[str]](status="NOT_REPORTED", value=None),
+                sample_size_enrolled=GroundedField[int](status="REPORTED", value=100, verbatim_quote="evaluated Drug Alpha in 100 participants", page_number=1),
+                intervention_details=GroundedField[str](status="REPORTED", value="Drug Alpha", verbatim_quote="evaluated Drug Alpha in 100 participants", page_number=1),
+                comparator_details=GroundedField[str](status="NOT_REPORTED", value=None),
+                follow_up_duration=GroundedField[str](status="NOT_REPORTED", value=None),
+            )
+        elif schema_cls == ResultsPassSchema:
+            return ResultsPassSchema(
+                sample_size_analyzed=GroundedField[int](status="REPORTED", value=100, verbatim_quote="100 participants were randomized", page_number=2),
+                baseline_characteristics_summary=GroundedField[str](status="NOT_REPORTED", value=None),
+                primary_outcomes=[
+                    GroundedField[OutcomeMeasure](
+                        status="REPORTED",
+                        value=OutcomeMeasure(
+                            outcome_name="Blood pressure",
+                            intervention_result="12 mmHg reduction",
+                            comparator_result="None",
+                        ),
+                        verbatim_quote="Blood pressure reduced by 12 mmHg.",
+                        page_number=2,
+                    )
+                ],
+                secondary_outcomes=[],
+                adverse_events_summary=GroundedField[str](status="NOT_REPORTED", value=None),
+                discontinuations_attrition=GroundedField[str](status="NOT_REPORTED", value=None),
+            )
+        elif schema_cls == DiscussionPassSchema:
+            return DiscussionPassSchema(
+                author_conclusions=GroundedField[str](status="NOT_REPORTED", value=None),
+                study_limitations=GroundedField[List[str]](status="NOT_REPORTED", value=None),
+                funding_and_conflicts=GroundedField[str](status="NOT_REPORTED", value=None),
+            )
+        elif schema_cls == CrossSectionAudit:
+            return CrossSectionAudit(
+                sample_size_consistent=True,
+                discrepancy_evidence=GroundedField[str](status="NOT_REPORTED", value=None),
+                overall_risk_of_reporting_bias="LOW",
+                audit_notes="Coherent N=100 across sections."
+            )
+        raise ValueError(f"Unexpected schema: {schema_cls}")
+
+    extractor = StudyExtractor(llm_structured_callable=mock_llm_callable, verifier=verifier)
+
+    chunks = {
+        "abstract_intro": [{"page": 1, "section": "abstract_intro", "text": real_page_texts[1]}],
+        "methods": [{"page": 2, "section": "methods", "text": real_page_texts[2]}],
+        "results": [{"page": 2, "section": "results", "text": real_page_texts[2]}],
+        "discussion": [],
+        "tables": [],
+    }
+
+    study_data = extractor.extract_all(
+        study_id="trial_100",
+        semantic_chunks=chunks,
+    )
+
+    assert study_data.study_id == "trial_100"
+    assert study_data.methods.sample_size_enrolled.verified_in_source is True
+    assert study_data.results.primary_outcomes[0].verified_in_source is True
+    assert study_data.semantic_audit.discrepancy_evidence.verified_in_source is True
+    assert len(verifier.verified_quotes) >= 4

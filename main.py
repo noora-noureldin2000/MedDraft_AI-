@@ -154,6 +154,14 @@ def main(
         json_out = Path(out) if out else (out_path / f"{target_pdf.stem}_extraction.json")
         json_out.write_text(study_data.model_dump_json(indent=2), encoding="utf-8")
         console.print(f"[bold green]✨ Auditable study extraction saved to: {json_out}[/bold green]")
+
+        # Write all accumulated verified sentence highlights in a single batch pass
+        if annotator and verifier.verified_quotes:
+            annotated_out = Path(annotated_pdf) if annotated_pdf else (out_path / f"{target_pdf.stem}_annotated.pdf")
+            saved_annotated = verifier.save_annotated_pdf(annotated_out)
+            if saved_annotated:
+                console.print(f"[bold green]✨ Highlighted proof PDF saved to: {saved_annotated}[/bold green]")
+
         return
 
     if not topic:

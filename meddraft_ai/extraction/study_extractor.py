@@ -147,13 +147,13 @@ class StudyExtractor:
         discussion_context = self.format_source_context((discussion_chunks + abstract_chunks) or all_text_chunks)
         discussion_data = self.run_verified_pass("PASS_3_DISCUSSION", DISCUSSION_SYSTEM_PROMPT, discussion_context, DiscussionPassSchema)
 
-        # Pass 4: Cross-Section Audit
+        # Pass 4: Cross-Section Audit (Deterministically verified)
         audit_prompt = (
             f"=== VERIFIED METHODS ===\n{methods_data.model_dump_json(indent=2)}\n\n"
             f"=== VERIFIED RESULTS ===\n{results_data.model_dump_json(indent=2)}\n\n"
             f"=== VERIFIED DISCUSSION ===\n{discussion_data.model_dump_json(indent=2)}"
         )
-        audit_data = self.call_llm(SYNTHESIS_SYSTEM_PROMPT, audit_prompt, CrossSectionAudit)
+        audit_data = self.run_verified_pass("PASS_4_CROSS_SECTION_AUDIT", SYNTHESIS_SYSTEM_PROMPT, audit_prompt, CrossSectionAudit)
 
         return StudyExtractionSchema(
             study_id=study_id,

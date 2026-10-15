@@ -5,6 +5,7 @@ import logging
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel
@@ -21,8 +22,8 @@ except ImportError:
 
 
 class GroundingVerifier:
-    """Verifies that every GroundedField exists verbatim in source text/tables
-    and contains zero hallucinated or rounded numbers.
+    """Verifies that every GroundedField exists verbatim in source text/tables,
+    contains zero hallucinated numbers, and aggregates verified quotes for write-once annotation.
     """
 
     def __init__(
@@ -30,12 +31,13 @@ class GroundingVerifier:
         page_texts: Dict[int, str],
         tables_json: Optional[List[Dict[str, Any]]] = None,
         pdf_annotator: Optional[Any] = None,
-        fuzzy_threshold: float = 90.0,
+        fuzzy_threshold: float = 95.0,
     ):
         self.page_texts = page_texts
         self.tables_json = tables_json or []
         self.annotator = pdf_annotator
         self.fuzzy_threshold = fuzzy_threshold
+        self.verified_quotes: List[str] = []
 
     @staticmethod
     def normalize_text(text: str) -> str:
@@ -56,25 +58,35 @@ class GroundingVerifier:
         )
         return re.sub(r"\s+", " ", text).strip().lower()
 
-    @staticmethod
-    def extract_numeric_tokens(val: Any) -> List[str]:
-        """Extracts all integer and decimal numbers from structured value or string."""
+    @classmethod
+    def extract_numeric_tokens(cls, val: Any) -> List[str]:
+        """Extracts all integer and decimal numbers strictly from values (never dictionary keys)."""
         if val is None:
             return []
         if isinstance(val, BaseModel):
+            tokens: List[str] = []
             dump = val.model_dump(exclude={"source_table_id", "timepoint", "analysis_population"})
-            raw_str = json.dumps(dump)
-        elif isinstance(val, (list, dict)):
-            raw_str = json.dumps(val)
-        else:
-            raw_str = str(val)
+            for v in dump.values():
+                tokens.extend(cls.extract_numeric_tokens(v))
+            return tokens
+        if isinstance(val, dict):
+            tokens: List[str] = []
+            for v in val.values():
+                tokens.extend(cls.extract_numeric_tokens(v))
+            return tokens
+        if isinstance(val, list):
+            tokens: List[str] = []
+            for item in val:
+                tokens.extend(cls.extract_numeric_tokens(item))
+            return tokens
 
+        raw_str = str(val)
         # Remove internal thousands separators (e.g. 1,200 -> 1200)
         raw_str = re.sub(r"(?<=\d),(?=\d{3}\b)", "", raw_str)
         return re.findall(r"\d+(?:\.\d+)?", raw_str)
 
     def _fuzzy_similarity(self, needle: str, haystack: str) -> float:
-        """Calculates partial substring similarity score between needle and haystack."""
+        """Calculates substring match score. Prioritizes exact substring containment."""
         if not needle or not haystack:
             return 0.0
         if needle in haystack:
@@ -93,7 +105,7 @@ class GroundingVerifier:
         if norm_target:
             candidates.append(norm_target)
 
-        # Cross-page boundary stitches (tail of prev + head of curr; tail of curr + head of next)
+        # Cross-page boundary stitches
         prev_page = self.page_texts.get(page_no - 1, "")
         if prev_page and target_page:
             boundary_prev = self.normalize_text(prev_page[-600:] + " " + target_page[:600])
@@ -127,8 +139,37 @@ class GroundingVerifier:
             return True, None
 
         if field.status == "UNCLEAR":
+            # Prevent dodging grounding: UNCLEAR is only valid if anchored by a quote demonstrating ambiguity
+            if not field.verbatim_quote or len(field.verbatim_quote.strip()) < 4:
+                field.verified_in_source = False
+                err = (
+                    f"[{field_path}] status='UNCLEAR' is rejected without source evidence. "
+                    f"Use 'NOT_REPORTED' if data is absent, or 'REPORTED' with exact quote. "
+                    f"UNCLEAR is only acceptable when citing contradictory text."
+                )
+                field.verification_note = err
+                return False, err
+
+            if not field.page_number or field.page_number not in self.page_texts:
+                field.verified_in_source = False
+                err = f"[{field_path}] Invalid page_number ({field.page_number}) for UNCLEAR ambiguity quote."
+                field.verification_note = err
+                return False, err
+
+            norm_quote = self.normalize_text(field.verbatim_quote)
+            candidates = self._build_candidate_search_texts(field.page_number, field.section_header)
+            best_score = max((self._fuzzy_similarity(norm_quote, cand) for cand in candidates), default=0.0)
+
+            if best_score < self.fuzzy_threshold:
+                field.verified_in_source = False
+                err = f"[{field_path}] Ambiguity quote not found on page {field.page_number} (score: {best_score:.1f}%)."
+                field.verification_note = err
+                return False, err
+
             field.verified_in_source = False
-            field.verification_note = "Marked UNCLEAR."
+            field.verification_note = f"Ambiguity documented from source (quote verified, match={best_score:.1f}%)."
+            if field.verbatim_quote not in self.verified_quotes:
+                self.verified_quotes.append(field.verbatim_quote)
             return True, None
 
         if not field.verbatim_quote or len(field.verbatim_quote.strip()) < 4:
@@ -174,16 +215,27 @@ class GroundingVerifier:
                 field.verification_note = err
                 return False, err
 
-        # Success: annotate if annotator available
-        if self.annotator is not None:
-            try:
-                self.annotator.highlight_sentences([field.verbatim_quote])
-            except Exception as exc:
-                logger.debug("PDFAnnotator highlight skipped: %s", exc)
-
         field.verified_in_source = True
         field.verification_note = f"Verified (match={best_score:.1f}%)"
+
+        # Accumulate quote for single-pass write-once PDF annotation
+        if field.verbatim_quote not in self.verified_quotes:
+            self.verified_quotes.append(field.verbatim_quote)
+
         return True, None
+
+    def save_annotated_pdf(self, output_path: str | Path) -> Optional[str]:
+        """Writes all accumulated verified quotes in a single batch pass to destination PDF."""
+        if self.annotator is None or not self.verified_quotes:
+            return None
+        try:
+            return self.annotator.highlight_sentences(
+                self.verified_quotes,
+                output_path=output_path,
+            )
+        except Exception as exc:
+            logger.warning("Failed saving annotated PDF to %s: %s", output_path, exc)
+            return None
 
     def verify_model(self, model: BaseModel) -> List[str]:
         """Recursively validates every GroundedField within a Pydantic model."""
