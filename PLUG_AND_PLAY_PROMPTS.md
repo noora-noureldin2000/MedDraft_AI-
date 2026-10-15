@@ -2,7 +2,7 @@
 
 This playbook contains ready-to-paste prompts that unlock **every feature** of the `MedDraft_AI` repo for **any study**. Every prompt is already tailored to the *actual* repo structure (real module paths, CLI flags, and file locations) so beginners can use them immediately without guessing.
 
-**What changed in this edition:** the pipeline now auto-runs two enrichments (ClinicalTrials.gov lookup in Phase 1b + secondary/nested-citation tracing in Phase 2b), the `refs` CLI grew from 4 to 8 subcommands, five new specialists were added (`Trials`, `SecondaryCitation`, `DeepResearch`, `AcademicPaper`, `Rebuttal`), and 25+ new skill packs landed (secondary-citation-extractor, medical-clinicaltrials, citation-integrity, academic-search-agent, surgical-word-reduction, and the 20-pack Nature Paper Skills layer). Prompts 1–6 below are updated for all of that, and Prompts 7–11 are brand-new recipes for the new capabilities.
+**What changed in this edition:** zero-hallucination single-PDF extraction (`python main.py --parse-pdf paper.pdf --out study.json --annotated-pdf proof.pdf`) — a 4-pass verified pipeline (Methods / Results+Tables / Discussion / cross-section audit) where every field carries a verbatim quote + page + verification status and absent data is emitted as `NOT_REPORTED`, never invented. See new Prompt 13. Also: the pipeline auto-runs two enrichments (ClinicalTrials.gov lookup in Phase 1b + secondary/nested-citation tracing in Phase 2b), the `refs` CLI grew from 4 to 8 subcommands, five new specialists were added (`Trials`, `SecondaryCitation`, `DeepResearch`, `AcademicPaper`, `Rebuttal`), and 25+ new skill packs landed (secondary-citation-extractor, medical-clinicaltrials, citation-integrity, academic-search-agent, surgical-word-reduction, and the 20-pack Nature Paper Skills layer). Prompts 1–6 below are updated for all of that, and Prompts 7–12 are recipes for those capabilities.
 
 ---
 
@@ -24,10 +24,15 @@ This playbook contains ready-to-paste prompts that unlock **every feature** of t
 | Standalone research CLI (8 subcommands) | `meddraft_ai/cli.py` → `python -m meddraft_ai refs ...` (deep-search, scholar-search, deep-dive, download, secondary-cite, trials-search, trials-get, plan-angles) |
 | Search-angle planner + word budgets + stalemate guard | `meddraft_ai/search/search_planner.py` (`plan_search_angles`, log ≤5000 words, stop collecting at ~4000) |
 | ClinicalTrials.gov v2 (filtered search + NCT lookup, no key) | `meddraft_ai/search/clinicaltrials.py` (`search_studies`, `get_study`, `should_include_trials`); auto-runs in `main.py` Phase 1b (limit 5, clinical topics only) |
-| Screening + PRISMA 2020 | `meddraft_ai/screening/` (`parser.py`, `deduplicator.py`, `screener.py`, `fulltext_screener.py`, `prisma.py`) |
-| PDF → Markdown (Docling, OCR, tables, figures) | `meddraft_ai/extraction/converter.py` |
-| PDF text/tables/metadata reading | `meddraft_ai/extraction/pdf_reader.py` |
-| Extraction orchestrator (auto-attaches `secondary_citations`) | `meddraft_ai/extraction/extraction_engine.py` |
+| Screening + PRISMA 2020 (standalone toolkit — NOT part of `main.py`; import directly for systematic-review flows) | `meddraft_ai/screening/` (`parser.py`, `deduplicator.py`, `screener.py`, `fulltext_screener.py`, `prisma.py`) |
+| PDF + Markdown (Docling, OCR, tables, figures) | `meddraft_ai/extraction/converter.py` (`DocumentConverterEngine.convert_full()` → `ProcessedDocumentBundle`: markdown + `docling_doc` + 1-indexed `page_texts` + `tables_data`) |
+| PDF text/tables/metadata reading | `meddraft_ai/extraction/pdf_reader.py` (`PDFReader`, `read_pages_dict()`) |
+| Extraction orchestrator (auto-attaches `secondary_citations`) | `meddraft_ai/extraction/extraction_engine.py` (`extract_text_and_citations()` for snippets; `process_pdf_full()` for complete untruncated conversion feeding Prompt 13) |
+| Zero-hallucination extraction schema (value + verbatim quote + page + status) | `meddraft_ai/extraction/schemas.py` (`GroundedField`, `OutcomeMeasure`, `MethodsPassSchema`, `ResultsPassSchema`, `DiscussionPassSchema`, `CrossSectionAudit`, `StudyExtractionSchema`) |
+| IMRaD semantic chunking + table provenance | `meddraft_ai/extraction/semantic_chunker.py` (`SemanticDocumentChunker`: abstract_intro/methods/results/discussion/tables buckets; Docling + text fallback) |
+| Verbatim grounding + numeric-fidelity verifier | `meddraft_ai/extraction/grounding_verifier.py` (`GroundingVerifier`: 95% fuzzy match, values-only number check, anti-evasion `UNCLEAR` rejection, downgrade-to-`UNCLEAR` valve, `save_annotated_pdf()` write-once highlights) |
+| 4-pass verified extractor + retry loop | `meddraft_ai/extraction/study_extractor.py` (`StudyExtractor`: Methods / Results+Tables / Discussion / verified audit via `LLMClient.query_structured()`, temperature 0.0) |
+| Extraction prompts (code contracts, NOT registry packs) | `meddraft_ai/prompts/study_extraction_prompts.py` (`CORE_GROUNDING_RULES`, `METHODS/RESULTS/DISCUSSION/SYNTHESIS_SYSTEM_PROMPT` — imported directly by `StudyExtractor`) |
 | Citation extraction + verification (CitationAnchor) | `meddraft_ai/extraction/citation_tracker.py` |
 | Nested/secondary citation tracing + dual attribution | `meddraft_ai/extraction/secondary_citation.py` (`SecondaryCitationExtractor`); auto-runs in `main.py` Phase 2b (max 5 claims) |
 | 5-tier reference validation (CrossRef/S2/OpenAlex/PubMed/arXiv) | `meddraft_ai/validation/reference_validator.py` |
@@ -1285,6 +1290,81 @@ TARGET_COMPONENT: [INSERT_COMPONENT_NAME_FOR_GENERATE_SINGLE]  # e.g., Abstract,
 
 ---
 
+# 🧬 PROMPT 13 — Zero-Hallucination Single-Study Extraction (`--parse-pdf`)
+
+**Purpose:** Extract structured, auditable study data (design, PICO, sample sizes, outcomes with exact effect sizes/CIs/p-values, adverse events, limitations, funding) from ONE study PDF with zero hallucination: every reported field is anchored to a verbatim quote + page, every number is fidelity-checked against the source, and anything absent is emitted as `NOT_REPORTED` — never invented.
+
+**Repo features used:** `main.py --parse-pdf` (standalone flow: `process_pdf_full()` → `SemanticDocumentChunker` → 4 verified passes → `StudyExtractionSchema` JSON + batched highlighted proof PDF), `meddraft_ai/extraction/schemas.py` (`GroundedField`, `OutcomeMeasure`), `meddraft_ai/extraction/grounding_verifier.py` (95% verbatim match, numeric fidelity, `UNCLEAR` anti-evasion), `meddraft_ai/extraction/study_extractor.py` (self-correction retries, max 2), `meddraft_ai/prompts/study_extraction_prompts.py` (grounding rules the extractor enforces).
+
+```text
+⚙️ System Prompt: Zero-Hallucination Study Extractor (MedDraft_AI --parse-pdf)
+
+<ROLE>
+You are the auditable data extractor for a single clinical study PDF. You output
+a StudyExtractionSchema JSON where every REPORTED field carries an exact
+character-for-character verbatim_quote and a 1-indexed page_number. You never
+use outside clinical knowledge. You never round, compute, or paraphrase numbers.
+</ROLE>
+
+<INPUTS>
+PDF_PATH: [INSERT_PATH_TO_STUDY_PDF]
+JSON_OUT: [INSERT_OUTPUT_JSON_PATH]  # e.g., outputs/study_extraction.json
+ANNOTATED_PDF: [INSERT_PROOF_PDF_PATH]  # e.g., outputs/study_annotated.pdf
+</INPUTS>
+
+<CLI_COMMAND (run from D:\GitHub\MedDraft_AI)>
+python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANNOTATED_PDF]"
+</CLI_COMMAND>
+
+<RULES_SNAPSHOT (the extractor enforces these programmatically; follow them manually when reviewing)>
+1. SOURCE OF TRUTH: the PDF text chunks + structured tables only (tables carry IDs
+   like Table_p5_1; cite source_table_id + table page for table-derived outcomes).
+2. VERBATIM QUOTES: exact substrings, no paraphrase, no "..." ellipses, no stitching
+   non-contiguous sentences (cross-page boundary windows excepted).
+3. NUMERIC FIDELITY: every integer/decimal/percentage/CI/p-value in `value` must appear
+   identically in the quote or table (keep trailing zeros: "0.70"; keep operators:
+   "p < 0.001"). Never compute percentages, sums, or risk ratios.
+4. MISSING DATA: not stated → status="NOT_REPORTED", value=None, verbatim_quote=None.
+   Contradictory/ambiguous → status="UNCLEAR" WITH a quote demonstrating the ambiguity.
+5. RETRY LOOP: fields failing verification are returned with the exact failure note;
+   fix the quote/page or downgrade to NOT_REPORTED — do not resubmit the same quote.
+</RULES_SNAPSHOT>
+
+<TASK>
+1. Run the CLI command; confirm the JSON was written.
+2. Audit the JSON: for each REPORTED field, locate verbatim_quote on page_number in
+   the PDF (use ANNOTATED_PDF highlights as the index).
+3. Flag any field whose numbers do not appear character-identical in its quote/table,
+   any REPORTED field with a missing/placeholder quote, and any UNCLEAR field lacking
+   an ambiguity quote.
+4. Cross-check denominators: enrolled N (Methods) vs analyzed N and outcome
+   denominators (Results/Tables) vs attrition; confirm the audit verdict
+   (sample_size_consistent + overall_risk_of_reporting_bias) matches the evidence.
+</TASK>
+
+<CAPABILITY_GUARD>
+- If the PDF is scanned/image-only with no extractable text, STOP and run Prompt 3
+  (Docling OCR) first — do not extract from a near-empty conversion.
+- If the JSON was produced but you cannot open the PDF to verify quotes, report
+  verification as NOT PERFORMED per field — never mark fields verified from memory.
+</CAPABILITY_GUARD>
+
+<OUTPUT_FORMAT>
+1. Extraction manifest: study_id, DOI/PMID, methods/results/discussion field counts
+   (REPORTED / NOT_REPORTED / UNCLEAR), tables used (IDs + pages).
+2. Verification table: field | status | quote found Y/N | numbers match Y/N | verdict.
+3. Denominator check: enrolled → analyzed → per-outcome N with attrition reconciliation.
+4. Final verdict: FIT-FOR-SYNTHESIS / FIT-WITH-CAVEATS (list) / RE-EXTRACT (list fields).
+</OUTPUT_FORMAT>
+```
+
+**Beginner tips**
+- This is the correct tool for "parse this paper thoroughly" — do NOT use `--pdf-input` for that; `--pdf-input` only injects a truncated snippet (25k chars) into manuscript drafting, while `--parse-pdf` processes the complete PDF with no truncation.
+- Table-heavy papers: check `source_table_id` on every `OutcomeMeasure` — effect sizes/CIs/p-values usually live in tables, and the JSON tells you exactly which table and page each came from.
+- `NOT_REPORTED` is a valid, honest result — it means the paper didn't state it, not that extraction failed. Only `UNCLEAR`-without-quote or failed numeric fidelity means re-extraction is needed.
+
+---
+
 ## ✅ Quick Reference: CLI Cheat Sheet
 
 | Task | Command (from `D:\GitHub\MedDraft_AI`) |
@@ -1299,6 +1379,7 @@ TARGET_COMPONENT: [INSERT_COMPONENT_NAME_FOR_GENERATE_SINGLE]  # e.g., Abstract,
 | Protocol | `python main.py --topic "..." --type protocol` |
 | Grant proposal / clinical report | `python main.py --topic "..." --type grant-proposal` (or `clinical-report`) |
 | Add your PDFs | append `--pdf-input "path/to/study.pdf"` (parent folder auto-loads as project dir; Phase 2b traces ≤5 nested citations) |
+| Thorough single-PDF extraction (Prompt 13) | `python main.py --parse-pdf "path/to/study.pdf" --out "outputs/study_extraction.json" --annotated-pdf "outputs/study_annotated.pdf"` (full PDF, no truncation; every field quote-anchored; absent data → `NOT_REPORTED`) |
 | Add stats JSON | append `--data-file "path/to/stats.json"` |
 | Deeper search | `--search-depth 25` |
 | Harvard/Vancouver | `--citation-style Harvard` (or `Vancouver`) |
@@ -1345,6 +1426,7 @@ TARGET_COMPONENT: [INSERT_COMPONENT_NAME_FOR_GENERATE_SINGLE]  # e.g., Abstract,
 - Google Scholar needs the stealth engine built (`npm run setup` once — installs deps, compiles `dist/cli.js`, downloads Chromium), or it silently returns no results. Default browsing is headful so interactive CAPTCHAs can be solved manually; `BROWSER_HEADLESS=true` opts into headless.
 - Vendored skill packages under `meddraft_ai/prompts/` (including the 20-pack Nature layer with its own `references/` and `scripts/`) have their own licenses/`.git` metadata; treat them as read-only assets. Upstream source: Boom5426/Nature-Paper-Skills v0.2.0 (7 of 27 upstream skills deliberately skipped — router, scientific-writing, nature-figure production, academic-researcher, conference/academic-presentations, reference-audit-guide — reasons in `meddraft_ai/prompts/nature-paper-skills/README.md`).
 - `main.py` auto-enrichments are bounded by design: Phase 1b trials lookup runs only for clinical-signal topics (limit 5) and Phase 2b secondary tracing caps at 5 claims — use Prompts 8–9 directly for deeper passes.
+- `--pdf-input` vs `--parse-pdf`: `--pdf-input` injects a truncated snippet (25k chars) into manuscript drafting — it is NOT thorough parsing. For full auditable extraction of one paper, always use Prompt 13 (`--parse-pdf`, no truncation, quote-anchored JSON + proof PDF).
 - ClinicalTrials.gov status is time-sensitive: always stamp status claims with the lookup date (Prompt 9's footer), or reviewers will flag them.
 - Secondary tracing needs an extractable reference list in the PDF. Scanned/image-only PDFs return `unverifiable` until OCR'd via Prompt 3.
 - Thesis DOCX export does not apply Cairo margins/pagination automatically — set them in Word post-export, then re-run Prompt 12 VALIDATE.
