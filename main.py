@@ -24,7 +24,6 @@ from meddraft_ai.extraction.pdf_reader import PDFReader
 from meddraft_ai.agents.specialists import (
     CoreWriterSpecialist,
     HumanizerSpecialist,
-    VerifierAndStatsSpecialist,
     ProofReaderSpecialist
 )
 from meddraft_ai.agents.medical_writer_agent import MedicalWriterAgent

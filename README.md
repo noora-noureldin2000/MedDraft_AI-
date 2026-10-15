@@ -91,7 +91,14 @@ python main.py --topic "CAR-T cell therapy in refractory lymphoma" --search-dept
 
 # Source-grounded thesis Discussion generation from project files
 python main.py --topic "Hibiscus extract on periodontal healing" --type thesis --project-dir ./projects/BioGap_G2_Hibiscus
+
+# Zero-hallucination structured extraction of a single study PDF
+# → auditable JSON (every field: value + verbatim quote + page + verification status)
+# → highlighted proof PDF with all verified quotes marked
+python main.py --parse-pdf ./sample_paper.pdf --out ./outputs/sample_extraction.json --annotated-pdf ./outputs/sample_annotated.pdf
 ```
+
+The `--parse-pdf` flow runs the full 4-pass pipeline with no truncation: Docling conversion → IMRaD semantic chunking → Methods / Results+Tables / Discussion extraction (each verified verbatim against source with numeric-fidelity checks and self-correction retries) → verified cross-section audit. Fields absent from the source are emitted as `NOT_REPORTED`, never invented.
 
 `--project-dir` points at a folder of Markdown materials (protocol, results, notes); when omitted but `--pdf-input` is given, the PDF's parent folder is auto-detected as the project directory.
 
