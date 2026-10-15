@@ -26,6 +26,7 @@ pdf_extractions/
 
 # Local research project data (input to --project-dir)
 projects/
+project_data/
 
 # IDE & OS
 .idea/

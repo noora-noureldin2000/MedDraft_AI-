@@ -50,6 +50,29 @@ class PDFReader:
 
         return ""
 
+    def read_pages_dict(self) -> Dict[int, str]:
+        """Extract 1-indexed dictionary of {page_number: text} for grounding verification."""
+        pages: Dict[int, str] = {}
+        if PDFPLUMBER_AVAILABLE:
+            try:
+                with pdfplumber.open(self.pdf_path) as pdf:
+                    for i, page in enumerate(pdf.pages, start=1):
+                        pages[i] = page.extract_text() or ""
+                return pages
+            except Exception:
+                pass
+
+        if PYPDF_AVAILABLE:
+            try:
+                reader = pypdf.PdfReader(self.pdf_path)
+                for i, page in enumerate(reader.pages, start=1):
+                    pages[i] = page.extract_text() or ""
+                return pages
+            except Exception:
+                pass
+
+        return pages
+
     def extract_tables(self) -> List[List[List[str]]]:
         """Extract structured tables from PDF using pdfplumber."""
         if not PDFPLUMBER_AVAILABLE:

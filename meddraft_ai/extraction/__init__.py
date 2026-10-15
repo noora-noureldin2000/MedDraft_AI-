@@ -16,9 +16,21 @@ from .secondary_citation import (
 from .extraction_engine import ExtractionEngine
 from .pdf_reader import PDFReader, read_pdf
 from .pdf_annotator import PDFAnnotator, highlight_pdf
+from .schemas import (
+    GroundedField,
+    OutcomeMeasure,
+    MethodsPassSchema,
+    ResultsPassSchema,
+    DiscussionPassSchema,
+    CrossSectionAudit,
+    StudyExtractionSchema,
+)
+from .semantic_chunker import SemanticDocumentChunker
+from .grounding_verifier import GroundingVerifier
+from .study_extractor import StudyExtractor
 
 try:
-    from .converter import DocumentConverter
+    from .converter import DocumentConverter, ProcessedDocumentBundle
 except Exception:  # noqa: BLE001  — native-lib crash guard
     import logging as _logging
     _logging.getLogger(__name__).warning(
@@ -26,9 +38,11 @@ except Exception:  # noqa: BLE001  — native-lib crash guard
         "PDF conversion via Docling will be disabled."
     )
     DocumentConverter = None  # type: ignore[assignment,misc]
+    ProcessedDocumentBundle = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "DocumentConverter",
+    "ProcessedDocumentBundle",
     "CitationTracker",
     "SecondaryCitationExtractor",
     "SecondaryCitation",
@@ -39,4 +53,14 @@ __all__ = [
     "read_pdf",
     "PDFAnnotator",
     "highlight_pdf",
+    "GroundedField",
+    "OutcomeMeasure",
+    "MethodsPassSchema",
+    "ResultsPassSchema",
+    "DiscussionPassSchema",
+    "CrossSectionAudit",
+    "StudyExtractionSchema",
+    "SemanticDocumentChunker",
+    "GroundingVerifier",
+    "StudyExtractor",
 ]

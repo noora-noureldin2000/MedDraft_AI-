@@ -53,3 +53,22 @@ class ExtractionEngine:
             "verified_citations": [c.to_dict() for c in verified_citations],
             "secondary_citations": secondary_citations,
         }
+
+    def process_pdf_full(self) -> Dict[str, Any]:
+        """Runs complete extraction without truncation, returning ProcessedDocumentBundle and verified citations."""
+        console.print(f"[bold blue]Processing complete PDF: {self.pdf_path.name}...[/bold blue]")
+        self.converter = DocumentConverter(self.pdf_path, self.output_dir)
+        bundle = self.converter.convert_full()
+        self.doc_text = bundle.markdown
+        self.markdown_path = self.converter.markdown_dir / f"{self.pdf_path.stem}.md"
+
+        citation_meta = self.converter.extract_citation_metadata()
+        verified_citations = CitationVerifier.extract_and_verify(self.doc_text)
+
+        return {
+            "study_id": self.pdf_path.stem,
+            "bundle": bundle,
+            "metadata": citation_meta,
+            "verified_citations": [c.to_dict() for c in verified_citations],
+        }
+

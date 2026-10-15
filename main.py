@@ -47,7 +47,7 @@ def load_project_context(project_path: Path) -> str:
     return "".join(context_parts)
 
 @click.command()
-@click.option("--topic", prompt="Research topic/question", help="The medical topic or research question to write about.")
+@click.option("--topic", default="", help="The medical topic or research question to write about.")
 @click.option("--type", "manuscript_type", default="manuscript", type=click.Choice([
     "manuscript", "thesis", "dissertation", "systematic-review", "narrative-review",
     "scoping-review", "meta-analysis", "protocol", "grant-proposal", "clinical-report"
@@ -60,6 +60,9 @@ def load_project_context(project_path: Path) -> str:
 @click.option("--output-format", default="both", type=click.Choice(["md", "docx", "both"]), help="Output file format.")
 @click.option("--data-file", default=None, help="Path to pre-computed stats JSON or raw dataset.")
 @click.option("--pdf-input", default=None, help="Path to reference PDF file(s) for extraction.")
+@click.option("--parse-pdf", default=None, help="Extract structured zero-hallucination study JSON from PDF.")
+@click.option("--out", default=None, help="Output JSON path for --parse-pdf extraction.")
+@click.option("--annotated-pdf", default=None, help="Output highlighted PDF path for --parse-pdf.")
 @click.option("--project-dir", default=None, help="Directory containing protocol, results, and discussion notes.")
 @click.option("--provider", default=None, type=click.Choice(["dual", "simple"]), help="LLM provider mode.")
 @click.option("--verbose", is_flag=True, default=False, help="Enable verbose log output.")
@@ -74,6 +77,9 @@ def main(
     output_format: str,
     data_file: str,
     pdf_input: str,
+    parse_pdf: str,
+    out: str,
+    annotated_pdf: str,
     project_dir: str,
     provider: str,
     verbose: bool
@@ -81,18 +87,83 @@ def main(
     """
     MedDraft_AI: Production-Ready Standalone Medical Research Writing Platform.
     """
-    console.print(Panel.fit(
-        f"[bold cyan]MedDraft_AI — Automated Medical Writing Platform[/bold cyan]\n"
-        f"Topic: [yellow]{topic}[/yellow] | Type: [green]{manuscript_type}[/green] | Humanize: [magenta]{humanize}[/magenta]",
-        border_style="cyan"
-    ))
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
 
     config = get_config()
     if provider:
         config.LLM_PROVIDER = provider
 
-    out_path = Path(output_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
+    # Standalone zero-hallucination study extraction workflow
+    if parse_pdf:
+        target_pdf = Path(parse_pdf)
+        if not target_pdf.exists():
+            console.print(f"[red]Error: PDF not found: {target_pdf}[/red]")
+            return
+
+        console.print(Panel.fit(
+            f"[bold cyan]MedDraft_AI — Zero-Hallucination Study Extractor[/bold cyan]\n"
+            f"Target PDF: [yellow]{target_pdf.name}[/yellow]",
+            border_style="cyan"
+        ))
+
+        from meddraft_ai.extraction import (
+            ExtractionEngine,
+            SemanticDocumentChunker,
+            GroundingVerifier,
+            StudyExtractor,
+            PDFAnnotator,
+        )
+        from meddraft_ai.core.llm_client import LLMClient
+
+        llm = LLMClient()
+        engine = ExtractionEngine(target_pdf, output_dir=out_path)
+        extraction_result = engine.process_pdf_full()
+        bundle = extraction_result["bundle"]
+
+        chunker = SemanticDocumentChunker()
+        chunks = chunker.chunk_bundle(bundle)
+
+        annotator = None
+        try:
+            annotator = PDFAnnotator(target_pdf)
+        except Exception as exc:
+            console.print(f"[yellow]PDFAnnotator notice: {exc}[/yellow]")
+
+        verifier = GroundingVerifier(
+            page_texts=bundle.page_texts,
+            tables_json=chunks.get("tables", []),
+            pdf_annotator=annotator,
+        )
+        extractor = StudyExtractor(
+            llm_structured_callable=llm.query_structured,
+            verifier=verifier,
+            max_retries=2,
+        )
+
+        study_doi = extraction_result.get("metadata", {}).get("doi")
+        study_pmid = extraction_result.get("metadata", {}).get("pmid")
+
+        study_data = extractor.extract_all(
+            study_id=target_pdf.stem,
+            semantic_chunks=chunks,
+            metadata_doi=study_doi,
+            metadata_pmid=study_pmid,
+        )
+
+        json_out = Path(out) if out else (out_path / f"{target_pdf.stem}_extraction.json")
+        json_out.write_text(study_data.model_dump_json(indent=2), encoding="utf-8")
+        console.print(f"[bold green]✨ Auditable study extraction saved to: {json_out}[/bold green]")
+        return
+
+    if not topic:
+        topic = click.prompt("Research topic/question")
+
+    console.print(Panel.fit(
+        f"[bold cyan]MedDraft_AI — Automated Medical Writing Platform[/bold cyan]\n"
+        f"Topic: [yellow]{topic}[/yellow] | Type: [green]{manuscript_type}[/green] | Humanize: [magenta]{humanize}[/magenta]",
+        border_style="cyan"
+    ))
 
     evidence_summary = ""
 
@@ -149,7 +220,7 @@ def main(
         console.print("\n[bold blue]Phase 2: Extracting Text & Metadata from PDF Input[/bold blue]")
         reader = PDFReader(pdf_input)
         pdf_text = reader.read_text()
-        evidence_summary += f"\n\nPDF INPUT TEXT SNIPPET:\n{pdf_text[:3000]}"
+        evidence_summary += f"\n\nPDF INPUT TEXT:\n{pdf_text[:25000]}"
         console.print(f"  Extracted text from [green]{Path(pdf_input).name}[/green]")
 
         # --- Step 2b: Automatic secondary/nested citation tracing ---

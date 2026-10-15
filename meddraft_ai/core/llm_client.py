@@ -1,7 +1,8 @@
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Type, TypeVar
+from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout
@@ -10,6 +11,8 @@ from meddraft_ai.core.config import get_config
 from meddraft_ai.core.provider_router import ProviderRouter
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
 
 class LLMClient:
     """
@@ -40,6 +43,61 @@ class LLMClient:
         
         # Simple or Dual Text via OpenAI-compatible endpoint
         return self._query_openai_compatible(system_prompt, user_prompt, route_info)
+
+    def query_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: Type[T],
+        temperature: float = 0.0,
+    ) -> T:
+        """Queries LLM and returns validated Pydantic model with automatic fallback."""
+        route_info = self.router.route(user_prompt)
+        base_url = route_info.get("base_url") or self.config.SIMPLE_BASE_URL
+        api_key = route_info.get("api_key") or self.config.SIMPLE_API_KEY or os.getenv("OPENAI_API_KEY", "")
+        model = route_info.get("model") or self.config.SIMPLE_MODEL
+
+        if not api_key:
+            raise ValueError("No API key configured. Set SIMPLE_API_KEY (or OPENAI_API_KEY) in your .env file.")
+
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=base_url if base_url else None)
+            completion = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format=response_model,
+                temperature=temperature,
+            )
+            parsed = completion.choices[0].message.parsed
+            if parsed is not None:
+                return parsed
+        except Exception as exc:
+            logger.debug("Native structured parse failed (%s); trying JSON schema prompt fallback.", exc)
+
+        schema_json = json.dumps(response_model.model_json_schema(), indent=2)
+        augmented_prompt = (
+            f"{user_prompt}\n\n"
+            f"You MUST return ONLY valid JSON matching this schema exactly:\n"
+            f"```json\n{schema_json}\n```"
+        )
+        raw_text = self._query_openai_compatible(system_prompt, augmented_prompt, route_info)
+        cleaned = self._clean_json_markdown(raw_text)
+        return response_model.model_validate_json(cleaned)
+
+    @staticmethod
+    def _clean_json_markdown(text: str) -> str:
+        """Strip markdown fences from LLM responses."""
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.lstrip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+            cleaned = cleaned.rstrip("`").strip()
+        return cleaned
 
     def _query_openai_compatible(self, system_prompt: str, user_prompt: str, route_info: Dict[str, Any]) -> str:
         base_url = route_info.get("base_url") or self.config.SIMPLE_BASE_URL

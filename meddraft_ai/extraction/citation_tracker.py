@@ -132,9 +132,9 @@ class CitationVerifier:
         except Exception:
             pass
 
-        # Fallback for valid format if offline or API rate-limited
+        # Fallback for valid format if offline or API rate-limited: do NOT mark verified without API proof
         if re.match(r"^10\.\d{4,}/.+$", clean_doi):
-            return VerifiedCitation(doi=clean_doi, verified=True, source="Format Verified")
+            return VerifiedCitation(doi=clean_doi, verified=False, source="FORMAT_VALID_API_UNVERIFIED")
 
         return VerifiedCitation(doi=clean_doi, verified=False, source="Not found on APIs")
 
@@ -181,8 +181,9 @@ class CitationVerifier:
                 if result.verified:
                     citations.append(result)
 
-        pmid_pattern = r"(?:PMID[:\s]*)?(\d{7,8})"
-        for match in re.finditer(pmid_pattern, text):
+        # Require explicit 'PMID' prefix to avoid matching bare 7-8 digit numbers (sample sizes, dates)
+        pmid_pattern = r"\bPMID[:\s]+(\d{7,8})\b"
+        for match in re.finditer(pmid_pattern, text, re.IGNORECASE):
             pmid = match.group(1)
             if not any(c.pmid == pmid for c in citations):
                 result = CitationVerifier.verify_pmid(pmid)
