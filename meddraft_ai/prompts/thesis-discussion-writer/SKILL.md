@@ -1,6 +1,6 @@
 ---
 name: thesis-discussion-writer
-description: "Writes medical thesis Discussion chapters and every sub-deliverable (introduction to discussion, comparative paragraphs, mechanism paragraphs, summary, conclusions, limitations, recommendations, humanization pass) in the Noora house style modeled on the strongest approved samples: inverted-funnel architecture, alternating findings-then-comparison block rhythm, evidence-anchored comparative paragraphs of ≤75 words built on verified open-access studies, MEAL paragraphs, strict tense discipline, bias-free language, humanized academic prose that resists AI detection, and numbered (house default) or Harvard citations with full verification."
+description: "Writes medical thesis Discussion chapters and every sub-deliverable (introduction to discussion, comparative paragraphs, mechanism paragraphs, summary, conclusions, limitations, recommendations, humanization pass) in the Noora house style modeled on the strongest approved samples: inverted-funnel architecture, alternating findings-then-comparison block rhythm, evidence-anchored comparative paragraphs of ≤75 words built on verified open-access studies, MEAL paragraphs, strict tense discipline, bias-free language, humanized academic prose that resists AI detection, and numbered (house default) or Harvard citations with full verification. Integrates the medical-discussion-writer supervisory framework (anti-data-dump rules, 4-step micro-formula, standard transitions, macro structure) without replacing house rules."
 ---
 
 # Medical Thesis Discussion Writer (Noora House Style)
@@ -300,6 +300,60 @@ The text must read as a graduate researcher with strong medical background wrote
 - [ ] No banned AI vocabulary, no semicolons, no em dashes; sentence rhythm varies.
 - [ ] Citations in one consistent mode; reference list complete with DOI/URL; verification notes included.
 - [ ] No reasoning steps or internal commentary disclosed in the deliverable.
+
+---
+
+## 15. Integrated framework: Medical Discussion Writer (supervisory requirements)
+
+This section integrates the **medical-discussion-writer** framework into the house style without replacing any of the rules above. Apply it whenever a draft needs the supervisory anti-data-dump discipline, the 4-step variable micro-formula, or the standard connector phrasing. Where the two frameworks overlap, the stricter rule wins (no raw tables, no fabricated references, exact own numbers).
+
+### 15.1 When to use (medical-discussion-writer scope)
+
+- Writing the Discussion section of a clinical thesis, dissertation, or manuscript.
+- Transforming raw statistical tables and results into an interpretative scientific narrative.
+- Benchmarking study findings against external literature (identifying agreements and disagreements).
+- Incorporating clinical and methodological rationales ("Researcher's Perspective").
+- Reviewing or critiquing existing draft discussions to eliminate redundant data dumps and raw table commentary.
+
+### 15.2 Core rules and anti-patterns (additive)
+
+- Never copy-paste raw results or table comments: the Discussion is an interpretation, not a rerun of the Results chapter. Do not report comprehensive frequency tables, standard deviations, exact counts, or repetitive p-values.
+- Convert statistics to qualitative narrative terms: use proportional phrasing such as "the majority," "more than two-thirds," "less than one-third," "a minor proportion," or "a statistically significant positive correlation."
+- Always pair agreements with disagreements: if findings align with regional or national literature, actively search for and contrast against divergent international or conflicting studies.
+- Mandatory clinical justification: never leave an agreement or discrepancy without explaining why (demographics, sample size, protocol variations, local healthcare constraints, cultural factors, or training gaps).
+
+### 15.3 Macro structure (additive progression)
+
+1. Introductory framing (1–2 paragraphs): global context and burden; core clinical rationale; study aim.
+2. Variable-by-variable core body (the 4-step micro-formula) — one thematic section per clinical variable.
+3. Inferential statistics and correlations: bivariate and multivariate associations, explained with theoretical frameworks.
+4. Overall synthesis and perspective: overarching clinical takeaway, institutional recommendations, or systemic implications.
+
+### 15.4 The 4-step micro-formula (per variable)
+
+Every thematic section or clinical variable must follow this four-step sequence:
+
+- Step 1 — State the finding (narrative summary): starter "Regarding [variable]...", "The findings of the present study revealed that..."; rule: summarize the qualitative trend (e.g., "more than half of the studied nurses demonstrated unsatisfactory practice...").
+- Step 2 — Benchmark of agreement: starter "This finding aligns with / is consistent with / is supported by [Author et al. (Year)], who also reported that..."
+- Step 3 — Benchmark of disagreement / contrast: starter "However, this finding contradicts / contrasts with / is not supported by [Author et al. (Year)], who observed that..."
+- Step 4 — Researcher's perspective (scientific and clinical justification): starter "From the researcher's perspective / The researcher suggests that these findings may be attributed to..."; content: supply 2–4 concrete, contextual reasons (workload, resource availability, protocol adherence, training deficits, diagnostic criteria).
+
+This micro-formula is a supervisory scaffold. When the house style (§3.2 alternating block rhythm and §5 comparative paragraphs of ≤75 words per study) is also required, keep the four steps but express Steps 2–3 as the house comparative paragraphs (stance opener, exact external values, link-back in words, discrepancy attribution) and Step 4 as the attribution clause.
+
+### 15.5 Standard phrasing and transitions (additive bank)
+
+- Opening variables: "Regarding [X]...", "Concerning [X]...", "In relation to [X]...", "As regards [X]..."
+- Reporting agreement: "These findings align with...", "This finding is consistent with the studies by...", "This result agrees with...", "This is supported by..."
+- Reporting contrast: "However, this finding contradicts...", "While, this result contradicted...", "However, these findings contrast with...", "This finding is not supported by..."
+- Attributing justifications: "From the researcher's perspective, this may be attributed to...", "The researcher suggests that...", "According to the researcher, these results could be due to..."
+
+These connectors supplement (do not replace) the house stance openers in §5 and the transition bank in §10.4 / references.
+
+### 15.6 Integration notes
+
+- The anti-data-dump rules in 15.2 are already enforced by §1 (integrity) and §11 (humanization); treat 15.2 as the supervisory wording of those rules.
+- The macro structure in 15.3 maps to §3 chapter architecture: 15.3.1 → §3.1, 15.3.2 → §3.2, 15.3.3 → mechanism/correlation blocks, 15.3.4 → §3.4 and §7–§9.
+- Keep the house self-check (§14) as the final gate; the medical-discussion-writer rules above are additional checks, not a replacement.
 
 ---
 
