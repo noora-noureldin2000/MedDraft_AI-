@@ -54,6 +54,11 @@
       "sourceType": "local",
       "computedHash": "e2f699c2e44521c459e4cb51749169b8760631354b60dc2cb2ab35d45458ae6c"
     },
+    "medical-discussion-writer": {
+      "source": "./.agents/skills/medical-discussion-writer",
+      "sourceType": "local",
+      "computedHash": "3ea5d6c3dd49b60c0e70a95df82a17574bb81a95de95c45432957a485825cb23"
+    },
     "citation-integrity": {
       "source": "./.agents/skills/citation-integrity",
       "sourceType": "local",
@@ -180,6 +185,11 @@
       "source": "./.agents/skills/surgical-word-reduction",
       "sourceType": "local",
       "computedHash": "9549f3f9ec9f847d89910c8737a3fe1ebc0550248561683cae09fa6288aa27ce"
+    },
+    "pdf": {
+      "source": "./.agents/skills/pdf",
+      "sourceType": "local",
+      "computedHash": "71545cb640117e9ced95dde5021973b75caa43ae6af9e991b56eac2f3a112426"
     }
   }
 }

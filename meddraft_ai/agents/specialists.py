@@ -247,6 +247,8 @@ class DeepResearchSpecialist(BaseSpecialist):
             "academic_research_skills/deep-research",
             "research_surfer",
             "academic-search-agent",
+            # PDF toolkit: text/table extraction, OCR fallback, forms.
+            "pdf/SKILL.md",
             # Nature layer: single-paper deep notes.
             "paper-analyzer/SKILL.md",
         ])

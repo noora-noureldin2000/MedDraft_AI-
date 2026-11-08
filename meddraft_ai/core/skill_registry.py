@@ -105,6 +105,30 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "tighten prose",
         "concise revision",
     ],
+    "pdf": [
+        "pdf",
+        "parse pdf",
+        "parsing pdf",
+        "parse this pdf",
+        "pdf parsing",
+        "extract text",
+        "extract table",
+        "extract data",
+        "read pdf",
+        "read this pdf",
+        "pdf form",
+        "fillable",
+        "scanned pdf",
+        "ocr",
+        "merge pdf",
+        "split pdf",
+        "split pages",
+        "rotate pdf",
+        "pdf metadata",
+        "annotate pdf",
+        "watermark",
+        "pdf document",
+    ],
     # Nature Paper Skills triggers (single source of truth in nature_integration).
     **_NATURE_TRIGGERS,
 }
@@ -168,25 +192,45 @@ class SkillRegistry:
         logger.debug("SkillRegistry loaded %d skill files.", len(self.skills))
         return self
 
+    def _read_skill_file(self, abs_path: str) -> str:
+        try:
+            return Path(abs_path).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return Path(abs_path).read_text(encoding="utf-8", errors="replace")
+        except OSError as io_err:
+            raise ValueError(
+                f"Skill file found in index but cannot be read: {abs_path}"
+            ) from io_err
+
+    def _resolve_skill_dir(self, name: str) -> str | None:
+        """Resolve a pack name (e.g. ``pdf``) to its ``SKILL.md``.
+
+        The index is keyed by file stem, so a pack whose entry point is
+        ``<pack>/SKILL.md`` would otherwise only be reachable as ``"SKILL"``.
+        Directory names are matched only when they are a single safe path
+        segment, which prevents traversal outside the prompts tree.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name or ""):
+            return None
+        candidate = self.prompts_dir / name / "SKILL.md"
+        return str(candidate) if candidate.is_file() else None
+
     def get_skill(self, name: str) -> str:
         """
         Return the content of the named skill file.
 
-        Raises ValueError if the skill is not found so callers know the registry
-        was not loaded or the name is wrong — rather than silently sending an
-        empty prompt to the LLM.
+        Resolution order: indexed file stem, then pack directory name whose
+        entry point is ``SKILL.md``. Raises ValueError if the skill is not
+        found so callers know the registry was not loaded or the name is wrong
+        — rather than silently sending an empty prompt to the LLM.
         """
         for skill in self.skills:
             if skill["name"].lower() == name.lower():
-                abs_path = skill["abs_path"]
-                try:
-                    return Path(abs_path).read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    return Path(abs_path).read_text(encoding="utf-8", errors="replace")
-                except OSError as io_err:
-                    raise ValueError(
-                        f"Skill file found in index but cannot be read: {abs_path}"
-                    ) from io_err
+                return self._read_skill_file(skill["abs_path"])
+
+        dir_skill = self._resolve_skill_dir(name)
+        if dir_skill:
+            return self._read_skill_file(dir_skill)
 
         raise ValueError(
             f"Skill '{name}' not found in registry. "
