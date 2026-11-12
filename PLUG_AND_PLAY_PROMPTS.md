@@ -43,7 +43,7 @@ This playbook contains ready-to-paste prompts that unlock **every feature** of t
 | New specialists (Trials, SecondaryCitation, DeepResearch, AcademicPaper, Rebuttal) | `meddraft_ai/agents/specialists.py` (`TrialsSpecialist`, `SecondaryCitationSpecialist`, `DeepResearchSpecialist`, `AcademicPaperSpecialist`, `RebuttalSpecialist`) |
 | APA 7th stats narrative from JSON | `meddraft_ai/agents/medical_writer_agent.py` |
 | Results-analysis bridge (experiment outputs → findings) | `meddraft_ai/prompts/results-analysis/` |
-| Skill auto-routing registry + Nature chain hook | `meddraft_ai/core/skill_registry.py` (`REGISTERED_PROMPT_SUBDIRS`, `AUTO_ROUTE_KEYWORDS`, `match_skill_for_task`), `meddraft_ai/core/nature_integration.py` (`PIPELINE_CHAINS`, `get_nature_chain`) |
+| Skill auto-routing registry + Nature chain hook | `meddraft_ai/core/skill_registry.py` (`REGISTERED_PROMPT_SUBDIRS`, `AUTO_ROUTE_KEYWORDS`, `match_skill_for_task`), `meddraft_ai/core/nature_integration.py` (`PIPELINE_CHAINS`, `get_nature_chain`), `meddraft_ai/core/language_routing.py` (mixed Arabic/Latin script detection) |
 | LLM routing (simple vs dual) | `meddraft_ai/core/` (`LLMClient`, provider routing: simple → OpenAI-compatible; dual → DeepSeek V4 Flash text + Qwen 2.5 VL vision via Ollama) |
 | Writing style skills (sciwrite, Noora humanizer, academic/medical skill packs) | `meddraft_ai/prompts/` |
 | Citation-integrity discipline (numbered sequential, academic-only, prohibited list) | `meddraft_ai/prompts/citation-integrity/` + `.agents/skills/citation-integrity/` |
@@ -55,8 +55,8 @@ This playbook contains ready-to-paste prompts that unlock **every feature** of t
 | Agent guard skills (pinned in `skills-lock.json`) | `.agents/skills/` (clean-code-guard, test-guard, docs-guard, wp-guard, woo-guard + all skills above) |
 | Assistant meta-skills (deep research, writing refiner, humanizer, browser) | `.agents/skills/academic-deep-research/`, `academic-writing-refiner/`, `ai-humanizer/`, `agent-browser/` |
 | APA templates & statistical terminology guides | `meddraft_ai/templates/` |
-| Journal formatting (MDPI, Elsevier) | `meddraft_ai/export/formatting_tools/formatting_tools/format_journal_cli.py` |
-| DOCX export (Pandoc / python-docx) | `meddraft_ai/export/pandoc_converter.py` |
+| DOCX export (Pandoc / python-docx) | `meddraft_ai/export/pandoc_converter.py` + `create_docx.py` (no publisher templates bundled) |
+| Arabic / mixed-direction DOCX repair (auto-routed by script) | `meddraft_ai/prompts/arabic-mixed-rtl.md` + `meddraft_ai/core/language_routing.py` |
 | Stealth browser engine (Scholar surfing, session mode) | `meddraft_ai/search/browser_engine/dist/cli.js` (`--session` JSONL protocol; legacy `navigate`/`click`) |
 | Default output folders | `outputs/` (manuscripts), `outputs/downloaded_papers/` (PDFs), `outputs/pdf_extractions/<pdf_name>/` (Markdown + figures) |
 | Local project materials (gitignored) | `projects/` |
@@ -656,19 +656,20 @@ numbers. Nested claims use dual attribution (Root, as cited in Container). Optio
 
 ## Master Prompt 5 — Journal Formatting & Prose Calibration Engine
 
-**Repo feature:** `meddraft_ai/export/formatting_tools/formatting_tools/format_journal_cli.py` (MDPI / Elsevier), plus `citation_formatter.py`, `reference_engine.py`, `ris_parser.py`. Pre-submission QA via `submission-audit` + `citation-verifier` + `surgical-word-reduction`; venue fit via `nature-portfolio-playbook`.
+**Repo feature:** generic DOCX export (`meddraft_ai/export/pandoc_converter.py` → `create_docx.py`, APA/AMA base style) plus the 5-tier reference validator (`meddraft_ai/validation/reference_validator.py`). Publisher-specific DOCX templates are not bundled — apply the journal's own template in Word after export, or pass a custom Pandoc `--reference-doc`. Pre-submission QA via `submission-audit` + `citation-verifier` + `surgical-word-reduction`; venue fit via `nature-portfolio-playbook`.
 
 **Run before the prompt:**
 ```bash
-python meddraft_ai/export/formatting_tools/formatting_tools/format_journal_cli.py --input "outputs/[DRAFT].docx" --output "outputs/[DRAFT]_MDPI.docx" --format MDPI --ris "[REFERENCES.ris]" --crossref
+python -c "from meddraft_ai.export import convert_markdown_to_docx as c; print(c('outputs/[DRAFT].md', 'outputs/[DRAFT].docx'))"
+python -m meddraft_ai.validation.reference_validator "outputs/[DRAFT].md" --format all --output outputs/ref_report.json
 ```
 
 ```text
 🤖 System Command: Journal Formatting & Prose Calibration Engine (MedDraft_AI)
 
 You are a manuscript-submission specialist. Calibrate the draft prose to the target
-journal's requirements, then run the repo's journal formatter. Work in this order:
-preflight → prose → references → formatter.
+journal's requirements, then export. Work in this order:
+preflight → prose → references → export.
 
 0. VENUE PREFLIGHT (nature-portfolio-playbook): confirm TARGET_JOURNAL_PUBLISHER fit
    (scope, article type, policy risks) before touching prose.
@@ -686,14 +687,13 @@ preflight → prose → references → formatter.
    placement) and the writing rules in `meddraft_ai/prompts/sciwrite/` plus
    `scientific-prose-style` (sentence lint) and `anti-defensive-writing` (de-audit).
    Output a corrected draft.
-5. FORMATTING: Use the journal CLI
-   (`format_journal_cli.py --format [MDPI|Elsevier] --ris [FILE.ris] --crossref [--zotero]`)
-   to apply the publisher's DOCX style (fonts, margins, table lines, numbered references).
-6. REFERENCES: Use `meddraft_ai/export/formatting_tools/formatting_tools/journal_formatting/`
-   (`ris_parser.py`, `citation_formatter.py`, `reference_engine.py`, `crossref_client.py`)
-   to build and resolve the reference list; fill unmatched references via CrossRef.
-7. VERIFY: Route the final reference list through
-   `meddraft_ai/validation/reference_validator.py` (5-tier cascade) AND the
+5. FORMATTING: Export with `convert_markdown_to_docx()` (Pandoc first, python-docx
+   fallback) to get the APA/AMA base style. If the target journal supplies a DOCX
+   template, apply it in Word afterwards; there is no bundled publisher formatter.
+6. REFERENCES: Build and resolve the reference list with
+   `meddraft_ai/validation/reference_validator.py` (CrossRef → Semantic Scholar →
+   OpenAlex → PubMed → arXiv); fill unmatched references via CrossRef lookups.
+7. VERIFY: Route the final reference list through the same 5-tier cascade AND the
    claim-source-verification support check; report verified/partial/not_found plus
    support-checked/support-failed counts.
 
@@ -706,7 +706,9 @@ TARGET_WORD_COUNT: [INSERT_TARGET_WORD_COUNT]
 REFERENCE_EXPANSION_TARGET: [INSERT_REFERENCE_EXPANSION_TARGET]
 </INPUTS_AND_VARIABLE_INJECTORS>
 ```
-> 💡 For Nature-portfolio venues, add a venue-fit paragraph (scope, article type, data-policy) from the `nature-portfolio-playbook` skill before formatting — MDPI/Elsevier CLI styles do not cover Nature requirements.
+> 💡 For Nature-portfolio venues, add a venue-fit paragraph (scope, article type, data-policy) from the `nature-portfolio-playbook` skill before formatting. Publisher DOCX templates are not bundled, so apply the journal's own template in Word after export.
+>
+> 💡 Arabic/English mixed documents route automatically to `meddraft_ai/prompts/arabic-mixed-rtl.md` (script detection in `meddraft_ai/core/language_routing.py`). Ask in either language — e.g. «نسّق هذا المستند المختلط» / "fix the RTL citations in this docx".
 
 ---
 
@@ -1387,7 +1389,7 @@ python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANN
 | Custom output folder | `--output-dir outputs` |
 | Provider override | `--provider simple` (or `dual`) |
 | Verbose logs | append `--verbose` |
-| Journal format DOCX | `python meddraft_ai/export/formatting_tools/formatting_tools/format_journal_cli.py --input out.docx --output out_MDPI.docx --format MDPI --ris refs.ris --crossref` |
+| Journal format DOCX | `python -c "from meddraft_ai.export import convert_markdown_to_docx as c; c('out.md','out.docx')"` (base APA/AMA style; no publisher template) |
 | Validate references | `python -m meddraft_ai.validation.reference_validator "outputs/draft.md" --format all --output report.json` |
 | Plan search angles | `python -m meddraft_ai refs plan-angles "your topic"` |
 | Combined deep search | `python -m meddraft_ai refs deep-search "your query" --limit 10` |

@@ -11,6 +11,11 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from meddraft_ai.core.language_routing import (
+    contains_arabic_script,
+    is_mixed_arabic_latin,
+    matches_mixed_arabic_document_task,
+)
 from meddraft_ai.core.skill_registry import SkillRegistry, REGISTERED_PROMPT_SUBDIRS
 
 
@@ -164,3 +169,56 @@ class TestNewPromptDirectories:
         registry = _make_registry_with_dir(tmp_path)
         names = [s["name"] for s in registry.skills]
         assert "ooxml" in names
+
+
+# ---------------------------------------------------------------------------
+# Arabic / mixed-direction script routing
+# ---------------------------------------------------------------------------
+
+class TestLanguageRouting:
+    def test_mixed_arabic_and_latin_is_detected(self):
+        assert is_mixed_arabic_latin("أصلح هذا المستند Word file") is True
+
+    def test_english_only_is_not_mixed(self):
+        assert is_mixed_arabic_latin("Fix the DOCX citations") is False
+
+    def test_arabic_only_is_not_mixed(self):
+        assert contains_arabic_script("أصلح هذا المستند") is True
+        assert is_mixed_arabic_latin("أصلح هذا المستند") is False
+
+    def test_english_request_naming_rtl_document_matches(self):
+        assert matches_mixed_arabic_document_task("fix RTL formatting in this docx") is True
+
+    def test_english_rtl_without_document_is_not_enough(self):
+        assert matches_mixed_arabic_document_task("what does RTL mean") is False
+
+
+@pytest.fixture(scope="module")
+def loaded_registry() -> SkillRegistry:
+    return SkillRegistry().load()
+
+
+class TestArabicSkillRouting:
+    def test_skill_file_is_indexed(self, loaded_registry):
+        assert "arabic-mixed-rtl" in [s["name"] for s in loaded_registry.skills]
+
+    def test_skill_content_is_retrievable(self, loaded_registry):
+        content = loaded_registry.get_skill("arabic-mixed-rtl")
+        assert "APA" in content
+        assert "w:rtl" in content
+
+    def test_mixed_script_task_routes_to_skill(self, loaded_registry):
+        task = "أريد تنسيق هذا المستند Word with mixed English citations"
+        assert loaded_registry.match_skill_for_task(task) == "arabic-mixed-rtl"
+
+    def test_english_rtl_document_task_routes_to_skill(self, loaded_registry):
+        assert loaded_registry.match_skill_for_task(
+            "Fix RTL formatting and citations in this docx"
+        ) == "arabic-mixed-rtl"
+
+    def test_plain_english_task_does_not_route_to_skill(self, loaded_registry):
+        assert loaded_registry.match_skill_for_task("Fix the DOCX citations") != "arabic-mixed-rtl"
+
+    def test_specific_skill_wins_over_script_detection(self, loaded_registry):
+        task = "Trace this nested citation as cited in Smith (2020) لقد ذكرها المؤلف"
+        assert loaded_registry.match_skill_for_task(task) == "secondary-citation-extractor"

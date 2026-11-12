@@ -9,8 +9,10 @@ from meddraft_ai.core.nature_integration import NATURE_TRIGGER_KEYWORDS as _NATU
 
 logger = logging.getLogger(__name__)
 
-# Prompt sub-directories that are always scanned in addition to the root.
-# New folders only need to be added here — no other code change required.
+# Prompt sub-directories recognised as skill packs. load() indexes every
+# .md/.txt file under prompts/ (including nested references), so this list is
+# the registration contract — not a scan filter: add a new pack here so the
+# registration tests and docs catch it, otherwise it still loads silently.
 REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "academic-writing",
     "academic_research_skills",
@@ -60,8 +62,17 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
 # routing. The secondary-citation-extractor entry delegates scoring to its
 # code layer (SecondaryCitationExtractor.match_score) via lazy import so the
 # registry stays dependency-light and import-cycle free. The clinical-trials
-# entry likewise delegates to clinicaltrials.should_include_trials.
+# entry likewise delegates to clinicaltrials.should_include_trials. The
+# arabic-mixed-rtl entry is primarily script-detected (see
+# core/language_routing.py); these phrases cover English-only task descriptions.
 AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
+    "arabic-mixed-rtl": [
+        "arabic",
+        "rtl",
+        "right-to-left",
+        "bilingual",
+        "mixed-direction",
+    ],
     "secondary-citation-extractor": [
         "as cited in",
         "secondary citation",
@@ -241,8 +252,9 @@ class SkillRegistry:
         """Automatically route a task description to the most relevant skill.
 
         Dedicated code-layer scorers run first (secondary-citation-extractor,
-        medical-clinicaltrials), then the Nature Paper Skills chain hook;
-        remaining packs fall back to keyword overlap.
+        medical-clinicaltrials, mixed Arabic/Latin script detection), then the
+        Nature Paper Skills chain hook; remaining packs fall back to keyword
+        overlap.
 
         Returns the skill/pack name (e.g. ``"secondary-citation-extractor"``)
         or ``None`` when nothing matches confidently.
@@ -262,6 +274,17 @@ class SkillRegistry:
             from meddraft_ai.search.clinicaltrials import should_include_trials
             if should_include_trials(task_text):
                 return "medical-clinicaltrials"
+        except ImportError:
+            pass
+        # Mixed Arabic/Latin text is a mixed-direction document task whatever
+        # the topic; English-only descriptions are caught by the Arabic/RTL cues.
+        try:
+            from meddraft_ai.core.language_routing import (
+                ARABIC_MIXED_RTL_SKILL,
+                matches_mixed_arabic_document_task,
+            )
+            if matches_mixed_arabic_document_task(task_text):
+                return ARABIC_MIXED_RTL_SKILL
         except ImportError:
             pass
         # Nature Paper Skills chain hook — specific compound patterns

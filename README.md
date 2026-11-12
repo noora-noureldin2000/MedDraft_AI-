@@ -22,6 +22,8 @@ Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automat
    - Takes raw pre-computed statistics JSON and writes publication-ready APA 7th narrative paragraphs and tables.
 5. **Live Reference Verification**:
    - Real-time API validation against CrossRef and PubMed to verify DOIs, PMIDs, authors, titles, and publication dates.
+   - Every run writes `reference_verification_report.json` and lists any DOI that no API confirmed, so hallucinated or unreachable references are visible before submission instead of being counted and discarded.
+
 6. **On-Demand Humanization Pass**:
    - Optional `--humanize` flag applies Dr. Noora Noureldin's writing style markers and anti-AI cliché rules as a final post-processing pass.
 7. **Dual & Simple LLM Provider Support**:
@@ -177,13 +179,13 @@ The repo carries two skill layers, both wired into the project's "brain":
 | `citation-verifier` | Offline `.bib` hygiene complementing live-API validation |
 | `nature-portfolio-playbook` | Venue fit + policy preflight (Nature / Methods / Biotech) |
 
-**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out skills automatically whenever the task text carries their signals (`as cited in` → `secondary-citation-extractor`; trial/phase/NCT language → `medical-clinicaltrials`; literature-review/numbered-citation language → `citation-integrity`; reduce-word-count/word-limit/shorten-manuscript language → `surgical-word-reduction`; background/timeline/research-log language → `academic-search-agent`; PDF parsing/extraction/form language → `pdf`). The pipeline likewise auto-runs them: `main.py` Phase 1 adds a bounded ClinicalTrials.gov lookup for clinical topics and Phase 2b traces secondary citations from any `--pdf-input`; `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `TrialsSpecialist` / `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carry the skill contexts for LLM-grounded work, while `citation-integrity` and `surgical-word-reduction` feed `CoreWriter`/`ProofReader` and `academic-search-agent` feeds `DeepResearchSpecialist`.
+**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out skills automatically whenever the task text carries their signals (`as cited in` → `secondary-citation-extractor`; trial/phase/NCT language → `medical-clinicaltrials`; mixed Arabic + Latin script, or Arabic/RTL + document wording → `arabic-mixed-rtl`; literature-review/numbered-citation language → `citation-integrity`; reduce-word-count/word-limit/shorten-manuscript language → `surgical-word-reduction`; background/timeline/research-log language → `academic-search-agent`; PDF parsing/extraction/form language → `pdf`). Script detection lives in `meddraft_ai/core/language_routing.py`. The pipeline likewise auto-runs them: `main.py` Phase 1 adds a bounded ClinicalTrials.gov lookup for clinical topics and Phase 2b traces secondary citations from any `--pdf-input`; `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `TrialsSpecialist` / `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carry the skill contexts for LLM-grounded work, while `citation-integrity` and `surgical-word-reduction` feed `CoreWriter`/`ProofReader` and `academic-search-agent` feeds `DeepResearchSpecialist`.
 
 **Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
 
 `academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
 
-Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically.
+Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `arabic-mixed-rtl.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically. `arabic-mixed-rtl.md` is a standalone skill selected by script detection rather than topic keywords: any request mixing Arabic and Latin letters, or naming Arabic/RTL formatting for a document, routes to it (see `meddraft_ai/core/language_routing.py` and `tests/test_skill_registry.py`).
 
 **Evaluated but not integrated** (additive-only policy respected; reasons recorded): `kesslerio/academic-deep-research` is already covered by the repo's local `academic-deep-research` skill + `DeepResearchSpecialist`; `dayunyan/academic-writer` was rejected (VirusTotal Suspicious flag, requires 4–7 GB texlive + Linux + an external hub skill, while Pandoc/DOCX export already covers output); `nimhar/aclawdemy` was rejected (VirusTotal Suspicious, external agent-publishing platform with API registration — conflicts with the zero-hallucination clinical posture); `huaruoji/research-report` was rejected (VirusTotal + OpenClaw Suspicious flags, texlive/conda/CUDA requirements, overlaps the existing export + 5-pass SciWrite audit). From `Boom5426/Nature-Paper-Skills` (27 skills evaluated), 20 were integrated (see table above) and 7 deliberately skipped: `paper-workflow` router (conflicts with `match_skill_for_task`; contracts vendored as references instead), `scientific-writing` (overlaps `academic-writing`), `nature-figure` production (heavy backend; planner + style cover the need), `academic-researcher` (duplicates `research_surfer`), `conference-paper-writing` / `academic-presentations` (out of scope), `reference-audit-guide` (overlaps live validation + claim-source checks).
 
@@ -213,13 +215,14 @@ D:\GitHub\MedDraft_AI\
 │   ├── screening/              # RIS/CSV parser, deduplication, screeners, PRISMA flow
 │   ├── agents/                 # CoreWriter, Humanizer, Verifier, ProofReader, MedicalWriter
 │   ├── validation/             # Live CrossRef & PubMed reference verification
-│   ├── export/                 # DOCX converter, Pandoc pipeline, journal formatters
+│   ├── export/                 # DOCX converter (Pandoc + python-docx), APA/AMA styling
 │   ├── prompts/                # Prompt & skill packs (registered in core/skill_registry.py)
 │   └── templates/              # APA statistical reporting templates
 ├── .agents/skills/             # Agent skills: guard skills + thesis-master-guide
 ├── skills-lock.json            # Pin file for .agents/skills (npx skills lockfile)
 ├── tests/                      # Pytest suite (skill registry, lock, search, PDF, export, validation)
 ├── projects/                   # Local research projects for --project-dir (gitignored)
+├── scratch/                    # Ad-hoc drafts and one-off scripts (gitignored)
 ├── outputs/                    # Generated manuscripts, downloads, scratch runs (gitignored)
 ├── ARCHITECTURE.md             # Pipeline and provider routing diagrams
 ├── CONTRIBUTING.md             # Code style, test, and PR process

@@ -8,6 +8,7 @@ Thank you for helping improve `MedDraft_AI`!
 - Keep agent prompts modular inside `meddraft_ai/prompts/`.
 - Ensure all citation references are verified via CrossRef/PubMed APIs — never allow hallucinated citations.
 - When adding a prompt pack under `meddraft_ai/prompts/`, register its folder in `REGISTERED_PROMPT_SUBDIRS` (`meddraft_ai/core/skill_registry.py`) and extend the registration tests in `tests/test_skill_registry.py`.
+- Root-level skill files (e.g. `meddraft_ai/prompts/arabic-mixed-rtl.md`) are indexed automatically; the filename stem is the routing key. If the skill should be auto-selected, add its trigger to `AUTO_ROUTE_KEYWORDS` or a dedicated scorer in `match_skill_for_task()`, and cover it in `tests/test_skill_registry.py`.
 - When adding an agent skill under `.agents/skills/`, pin it in `skills-lock.json` (`npx skills` lockfile format); `tests/test_skills_lock.py` enforces lock/ directory coverage.
 
 ## Running Tests
