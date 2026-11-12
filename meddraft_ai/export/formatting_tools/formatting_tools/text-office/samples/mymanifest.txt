@@ -1,5 +1,0 @@
-# basic example of using manifest files
-
-samples/lists.md
-samples/figures.md
-samples/tables.md

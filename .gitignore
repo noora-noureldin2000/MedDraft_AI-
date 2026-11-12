@@ -28,6 +28,9 @@ pdf_extractions/
 projects/
 project_data/
 
+# Ad-hoc scratch material (one-off drafts, extracted texts, build scripts)
+scratch/
+
 # IDE & OS
 .idea/
 .vscode/

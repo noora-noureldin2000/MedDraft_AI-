@@ -1,46 +1,50 @@
 ---
 name: document-formatting-skill
-description: "Instructions for stylistically formatting Markdown documents and converting them into professional journal-ready Microsoft Word (.docx) files (e.g. MDPI, Elsevier)."
+description: "Instructions for styling Markdown manuscripts and exporting them to APA/AMA-compliant Microsoft Word (.docx) files using the repo's python-docx and Pandoc converters."
 license: MIT
 
 ---
 
 # Stylistic Document Formatting Skill Guide
 
-This skill document defines the workflow for creating, styling, and formatting scientific manuscripts using the **text-office** and **journal_formatting** tools. 
-As an AI medical writer, you should prefer drafting content in Markdown and only use these tools when a `.docx` output is requested.
+This skill defines the workflow for turning a finished Markdown manuscript into a
+styled `.docx` using the converters that actually ship in this repo:
+
+- `meddraft_ai/export/pandoc_converter.py` — Pandoc first, python-docx fallback.
+- `meddraft_ai/export/create_docx.py` — `MarkdownDocxConverter` (Times New Roman
+  12 pt, double spacing, inline bold/italic, headings, tables).
+
+Draft in Markdown, export last. Do not hand-edit OOXML.
 
 ---
 
-## 1. The Two-Step Formatting Workflow
+## 1. Export Workflow
 
-When asked to produce a formatted Word document, follow this two-step pipeline:
+`main.py` already runs this in Phase 8 (`--output-format both|docx`). To export an
+existing Markdown file:
 
-1. **Markdown to DOCX Conversion:** Generate the content in a Markdown file (`.md`), then convert it to a standard `.docx` document using `text-office`.
-2. **Journal-Specific Formatting:** Pass the standard `.docx` through `journal_formatting` to apply target journal templates (e.g., MDPI, Elsevier).
-
-### Step 1: text-office (Markdown to DOCX)
-`text-office.py` interprets Markdown syntax (headers, lists, tables, bold/italics) and outputs a clean `.docx`.
-
-**Command syntax:**
 ```bash
-python d:/GitHub/Mega_Medical_writer_Noora/scripts/formatting_tools/text-office/text-office.py input.md -o temp_output.docx
+python -c "from meddraft_ai.export import convert_markdown_to_docx as c; print(c('outputs/draft.md', 'outputs/draft.docx'))"
 ```
-*(You can also use `-dxopt default_figure_width=3in` for figure scaling if needed).*
 
-### Step 2: format_journal_cli (Targeted Formatting)
-`format_journal_cli.py` applies specific publisher styles (MDPI or Elsevier) to an existing `.docx` file.
+`convert_markdown_to_docx()` invokes `pandoc <md> -o <docx>` when Pandoc is on
+PATH; otherwise it falls back to `MarkdownDocxConverter`, which applies the
+manuscript style programmatically.
 
-**Command syntax:**
-```bash
-python d:/GitHub/Mega_Medical_writer_Noora/scripts/formatting_tools/format_journal_cli.py --input temp_output.docx --output final_formatted.docx --format MDPI
-```
-*(Available formats are typically `MDPI` or `Elsevier`)*
+### Style rules applied by the native fallback
 
-#### Optional Flags:
-* `--ris path/to/refs.ris`: Matches citations against a `.ris` file to properly format the bibliography.
-* `--zotero`: Embeds Zotero-compatible field codes.
-* `--crossref`: Uses the internet to lookup unmatched references.
+| Element | Rule |
+| :--- | :--- |
+| Body text | Times New Roman 12 pt, double spaced, 0 pt before/after |
+| Headings | Bold, black (no theme blue), same family |
+| Inline markup | `**bold**` and `*italic*` parsed into separate runs |
+| Tables | Standard Markdown tables converted to Word tables |
+| References | Plain text list; validate with the 5-tier checker (below) |
+
+Publisher-specific DOCX templates (MDPI/Elsevier page geometry, three-line
+tables, Zotero field codes) are **not** bundled in this repo. If a submission
+needs them, apply the journal's own template in Word after export, or supply a
+custom Pandoc `--reference-doc`.
 
 ---
 
@@ -48,6 +52,16 @@ python d:/GitHub/Mega_Medical_writer_Noora/scripts/formatting_tools/format_journ
 
 * **Always draft in Markdown first.** It prevents raw XML manipulation errors and is much faster.
 * Use **Heading 1 (`#`)** for main sections (e.g., Introduction, Methods) and **Heading 2 (`##`)** for subsections.
-* Keep tables as standard Markdown tables; `text-office` will convert them to Word tables, and `journal_formatting` will style them (e.g., three-line tables).
-* For references, use simple `[1]`, `[2]` bracket notation in your Markdown. When running `format_journal_cli`, provide an exported RIS file via `--ris` to automatically build out the bibliography in the target style.
-* When executing commands, use your terminal capability to string the pipeline together automatically for the user.
+* Keep tables as standard Markdown tables so the converter can map them to Word tables.
+* For references, use simple `[1]`, `[2]` bracket notation in Markdown. Validate the
+  extracted DOIs/PMIDs before export:
+
+  ```bash
+  python -m meddraft_ai.validation.reference_validator "outputs/draft.md" --format all --output outputs/ref_report.json
+  ```
+
+* Verification is live: only `status == "verified"` or `"partial_match"` records may
+  enter the final bibliography; `not_found` entries are treated as hallucinated and
+  must be removed or replaced.
+* Run `submission-audit` + `citation-verifier` on the exported draft as the
+  pre-submission gate.
