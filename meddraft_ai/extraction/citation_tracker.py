@@ -9,6 +9,27 @@ from dataclasses import dataclass, field
 from rich.console import Console
 console = Console()
 
+# DOI-shaped token, as it appears inside running prose.
+DOI_PATTERN = r"10\.\d{4,}/[-._;()/:a-zA-Z0-9]+"
+
+# Sentence punctuation that routinely trails a DOI in prose ("…/bmj.e075707.").
+_TRAILING_PUNCT = ".,;:]"
+
+
+def strip_doi_punctuation(raw: str) -> str:
+    """Return a bare DOI with trailing sentence punctuation removed.
+
+    ``10.1016/S0140-6736(20)30183-5).`` → ``10.1016/S0140-6736(20)30183-5``
+
+    DOIs may legitimately contain parentheses and dots, so only trailing
+    punctuation is stripped, and a closing parenthesis is removed only when it
+    is unbalanced (i.e. it belongs to the surrounding sentence).
+    """
+    doi = (raw or "").strip().rstrip(_TRAILING_PUNCT)
+    while doi.endswith(")") and doi.count("(") < doi.count(")"):
+        doi = doi[:-1].rstrip(_TRAILING_PUNCT)
+    return doi
+
 @dataclass
 class VerifiedCitation:
     doi: Optional[str] = None
@@ -56,7 +77,7 @@ class CitationVerifier:
 
     @staticmethod
     def verify_doi(doi: str) -> VerifiedCitation:
-        clean_doi = doi.strip()
+        clean_doi = strip_doi_punctuation(doi)
         for prefix in ["doi:", "DOI:", "https://doi.org/", "http://dx.doi.org/"]:
             if clean_doi.startswith(prefix):
                 clean_doi = clean_doi[len(prefix):].strip()
@@ -173,9 +194,10 @@ class CitationVerifier:
     @staticmethod
     def extract_and_verify(text: str) -> List[VerifiedCitation]:
         citations = []
-        doi_pattern = r"10\.\d{4,}/[-._;()/:a-zA-Z0-9]+"
-        for match in re.finditer(doi_pattern, text):
-            doi = match.group(0)
+        for match in re.finditer(DOI_PATTERN, text):
+            doi = strip_doi_punctuation(match.group(0))
+            if not doi:
+                continue
             if not any(c.doi == doi for c in citations):
                 result = CitationVerifier.verify_doi(doi)
                 if result.verified:

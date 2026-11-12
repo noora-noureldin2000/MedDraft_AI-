@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, Any, Optional, Type, TypeVar
 from pydantic import BaseModel
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout
 
@@ -13,6 +13,21 @@ from meddraft_ai.core.provider_router import ProviderRouter
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+def _is_retryable_failure(exc: Exception) -> bool:
+    """Retry transient failures only.
+
+    Connection errors and timeouts are transient. HTTP errors are retried only
+    for rate limiting (429) and server faults (5xx); 400/401/403 are permanent
+    and must surface immediately.
+    """
+    if isinstance(exc, (RequestsConnectionError, Timeout)):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return False
+
 
 class LLMClient:
     """
@@ -26,10 +41,8 @@ class LLMClient:
         self.api_type = self.config.LLM_PROVIDER or "openai_compatible"
         self.model_name = self.config.SIMPLE_MODEL or self.config.MAIN_MODEL or "gpt-4o-mini"
 
-    # Retry only on transient network failures: connection errors, timeouts, HTTP 429/5xx.
-    # Auth errors (401/403) and bad requests (400) are NOT retried — they will always fail.
     @retry(
-        retry=retry_if_exception_type((RequestsConnectionError, Timeout, requests.exceptions.HTTPError)),
+        retry=retry_if_exception(_is_retryable_failure),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
@@ -76,6 +89,10 @@ class LLMClient:
             if parsed is not None:
                 return parsed
         except Exception as exc:
+            # Auth/permission failures are permanent; retrying them as a plain
+            # JSON prompt would only hide the real configuration error.
+            if getattr(exc, "status_code", None) in (401, 403):
+                raise
             logger.debug("Native structured parse failed (%s); trying JSON schema prompt fallback.", exc)
 
         schema_json = json.dumps(response_model.model_json_schema(), indent=2)
@@ -157,6 +174,10 @@ class LLMClient:
         if image_path and os.path.exists(image_path):
             with open(image_path, "rb") as f:
                 images.append(base64.b64encode(f.read()).decode("utf-8"))
+        if not images:
+            raise FileNotFoundError(
+                f"Vision routing requires a readable image; got {image_path!r}."
+            )
 
         endpoint = f"{base_url.rstrip('/')}/api/generate"
         payload = {

@@ -86,6 +86,11 @@ class PrismaFlow:
         
         # 4. Included
         studies_included = sum(1 for r in screened_records if r.get("fulltext", {}).get("verdict") == "INCLUDE")
+
+        # Assessed reports that are neither included nor excluded (UNSURE, or no
+        # full-text verdict recorded). Without this the flow does not reconcile:
+        # assessed ≠ included + excluded, which is indefensible in a submission.
+        reports_unresolved = max(0, reports_assessed - reports_excluded - studies_included)
         
         # Generate ASCII Flowchart
         ascii_flow = (
@@ -114,7 +119,10 @@ class PrismaFlow:
         
         for reason, count in excluded_reasons.items():
             ascii_flow += f"│    - {reason[:35]:<35} (n = {count:<3})     │\n"
-            
+
+        if reports_unresolved:
+            ascii_flow += f"│  Awaiting classification (n = {reports_unresolved:<5})              │\n"
+
         ascii_flow += (
             f"└───────────────────────────┬────────────────────────────┘\n"
             f"                            │\n"
@@ -146,7 +154,12 @@ class PrismaFlow:
             f"        EL2[\"Reports not retrieved<br/>(n = {reports_not_retrieved})\"]\n"
             f"        EL3[\"Reports assessed for eligibility<br/>(n = {reports_assessed})\"]\n"
             f"        EL4[\"Reports excluded (n = {reports_excluded}){reasons_str}\"]\n"
-            "    end\n\n"
+            + (
+                f"        EL5[\"Awaiting classification<br/>(n = {reports_unresolved})\"]\n"
+                if reports_unresolved
+                else ""
+            )
+            + "    end\n\n"
             "    subgraph Included\n"
             f"        IN1[\"Studies included in systematic review<br/>(n = {studies_included})\"]\n"
             "    end\n\n"
@@ -172,6 +185,7 @@ class PrismaFlow:
                 "not_retrieved": reports_not_retrieved,
                 "assessed": reports_assessed,
                 "excluded": reports_excluded,
+                "unresolved": reports_unresolved,
                 "included": studies_included
             }
         }

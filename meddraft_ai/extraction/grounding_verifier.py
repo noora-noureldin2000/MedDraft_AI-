@@ -97,6 +97,22 @@ class GroundingVerifier:
         match = matcher.find_longest_match(0, len(needle), 0, len(haystack))
         return (match.size / len(needle)) * 100.0 if needle else 0.0
 
+    def _table_search_texts(self, page_no: int, section_header: Optional[str]) -> List[str]:
+        """Normalised markdown/record text for tables on *page_no* or matching *section_header*."""
+        texts: List[str] = []
+        for table in self.tables_json:
+            same_page = table.get("page") == page_no
+            same_table = bool(section_header) and table.get("table_id") == section_header
+            if not (same_page or same_table):
+                continue
+            table_markdown = self.normalize_text(table.get("markdown", ""))
+            table_records = self.normalize_text(json.dumps(table.get("records", [])))
+            if table_markdown:
+                texts.append(table_markdown)
+            if table_records:
+                texts.append(table_records)
+        return texts
+
     def _build_candidate_search_texts(self, page_no: int, section_header: Optional[str]) -> List[str]:
         """Builds page text, cross-page boundary windows, and table texts."""
         candidates: List[str] = []
@@ -116,18 +132,7 @@ class GroundingVerifier:
             boundary_next = self.normalize_text(target_page[-600:] + " " + next_page[:600])
             candidates.append(boundary_next)
 
-        # Table content on that page or matching section header
-        for tbl in self.tables_json:
-            tbl_page = tbl.get("page")
-            tbl_id = tbl.get("table_id")
-            if tbl_page == page_no or (section_header and tbl_id == section_header):
-                tbl_md = self.normalize_text(tbl.get("markdown", ""))
-                tbl_records = self.normalize_text(json.dumps(tbl.get("records", [])))
-                if tbl_md:
-                    candidates.append(tbl_md)
-                if tbl_records:
-                    candidates.append(tbl_records)
-
+        candidates.extend(self._table_search_texts(page_no, section_header))
         return candidates
 
     def verify_field(self, field_path: str, field: GroundedField[Any]) -> Tuple[bool, Optional[str]]:
@@ -166,7 +171,7 @@ class GroundingVerifier:
                 field.verification_note = err
                 return False, err
 
-            field.verified_in_source = False
+            field.verified_in_source = True
             field.verification_note = f"Ambiguity documented from source (quote verified, match={best_score:.1f}%)."
             if field.verbatim_quote not in self.verified_quotes:
                 self.verified_quotes.append(field.verbatim_quote)
@@ -199,10 +204,14 @@ class GroundingVerifier:
             field.verification_note = err
             return False, err
 
-        # Numeric exact-match check
+        # Numeric exact-match check. The corpus is the quote plus the tables on
+        # that page: numbers taken from unrelated prose elsewhere on the page
+        # must not launder a fabricated value.
         value_numbers = self.extract_numeric_tokens(field.value)
         if value_numbers:
-            corpus = norm_quote + " " + " ".join(candidates)
+            corpus = " ".join(
+                [norm_quote] + self._table_search_texts(field.page_number, field.section_header)
+            )
             corpus_numbers: Set[str] = set(self.extract_numeric_tokens(corpus))
             missing_nums = [n for n in value_numbers if n not in corpus_numbers]
 
@@ -240,7 +249,7 @@ class GroundingVerifier:
     def verify_model(self, model: BaseModel) -> List[str]:
         """Recursively validates every GroundedField within a Pydantic model."""
         errors: List[str] = []
-        for name, field_info in model.__class__.model_fields.items():
+        for name in model.__class__.model_fields:
             attr = getattr(model, name, None)
             if isinstance(attr, GroundedField):
                 ok, err = self.verify_field(name, attr)
@@ -252,14 +261,40 @@ class GroundingVerifier:
                         ok, err = self.verify_field(f"{name}[{idx}]", item)
                         if not ok and err:
                             errors.append(err)
+                    elif isinstance(item, BaseModel):
+                        # Nested models inside a list must still be grounded;
+                        # skipping them would silently bypass the contract.
+                        errors.extend(self._verify_nested(f"{name}[{idx}]", item))
             elif isinstance(attr, BaseModel):
                 sub_errs = self.verify_model(attr)
                 errors.extend(sub_errs)
         return errors
 
+    def _verify_nested(self, prefix: str, model: BaseModel) -> List[str]:
+        """Verify a nested model that lives inside a list, prefixing error paths."""
+        errors: List[str] = []
+        for name in model.__class__.model_fields:
+            attr = getattr(model, name, None)
+            path = f"{prefix}.{name}"
+            if isinstance(attr, GroundedField):
+                ok, err = self.verify_field(path, attr)
+                if not ok and err:
+                    errors.append(err)
+            elif isinstance(attr, list):
+                for idx, item in enumerate(attr):
+                    if isinstance(item, GroundedField):
+                        ok, err = self.verify_field(f"{path}[{idx}]", item)
+                        if not ok and err:
+                            errors.append(err)
+                    elif isinstance(item, BaseModel):
+                        errors.extend(self._verify_nested(f"{path}[{idx}]", item))
+            elif isinstance(attr, BaseModel):
+                errors.extend(self._verify_nested(path, attr))
+        return errors
+
     def downgrade_unverified_fields(self, model: BaseModel) -> None:
         """Downgrades any REPORTED field failing verification to UNCLEAR."""
-        for name, field_info in model.__class__.model_fields.items():
+        for name in model.__class__.model_fields:
             attr = getattr(model, name, None)
             if isinstance(attr, GroundedField) and attr.status == "REPORTED" and not attr.verified_in_source:
                 logger.warning("Downgrading unverified field '%s' to UNCLEAR to preserve zero-hallucination contract.", name)
@@ -271,5 +306,27 @@ class GroundingVerifier:
                         logger.warning("Downgrading unverified field '%s[%d]' to UNCLEAR.", name, idx)
                         item.status = "UNCLEAR"
                         item.verification_note = f"DOWNGRADED_AFTER_RETRIES: {item.verification_note}"
+                    elif isinstance(item, BaseModel):
+                        self._downgrade_nested(f"{name}[{idx}]", item)
             elif isinstance(attr, BaseModel):
                 self.downgrade_unverified_fields(attr)
+
+    def _downgrade_nested(self, prefix: str, model: BaseModel) -> None:
+        """Mirror downgrade_unverified_fields for models nested inside lists."""
+        for name in model.__class__.model_fields:
+            attr = getattr(model, name, None)
+            path = f"{prefix}.{name}"
+            if isinstance(attr, GroundedField) and attr.status == "REPORTED" and not attr.verified_in_source:
+                logger.warning("Downgrading unverified field '%s' to UNCLEAR.", path)
+                attr.status = "UNCLEAR"
+                attr.verification_note = f"DOWNGRADED_AFTER_RETRIES: {attr.verification_note}"
+            elif isinstance(attr, list):
+                for idx, item in enumerate(attr):
+                    if isinstance(item, GroundedField) and item.status == "REPORTED" and not item.verified_in_source:
+                        logger.warning("Downgrading unverified field '%s[%d]' to UNCLEAR.", path, idx)
+                        item.status = "UNCLEAR"
+                        item.verification_note = f"DOWNGRADED_AFTER_RETRIES: {item.verification_note}"
+                    elif isinstance(item, BaseModel):
+                        self._downgrade_nested(f"{path}[{idx}]", item)
+            elif isinstance(attr, BaseModel):
+                self._downgrade_nested(path, attr)

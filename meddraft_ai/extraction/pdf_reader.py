@@ -105,9 +105,15 @@ class PDFReader:
                 pass
 
         full_text = self.read_text()
-        doi_match = re.search(r"10\.\d{4,}/[-._;()/:a-zA-Z0-9]+", full_text)
+        from meddraft_ai.extraction.citation_tracker import (
+            DOI_PATTERN,
+            strip_doi_punctuation,
+        )
+        doi_match = re.search(DOI_PATTERN, full_text)
         if doi_match:
-            meta["doi"] = doi_match.group(0)
+            doi = strip_doi_punctuation(doi_match.group(0))
+            if doi:
+                meta["doi"] = doi
 
         pmid_match = re.search(r"PMID[:\s]*(\d+)", full_text, re.IGNORECASE)
         if pmid_match:
@@ -116,27 +122,32 @@ class PDFReader:
         return meta
 
     def annotate_citation_anchors(self, citations: List[Dict[str, Any]], output_pdf_path: Optional[str | Path] = None) -> str:
+        """Highlight citation anchors in a copy of the PDF.
+
+        ``citations`` entries may carry ``verbatim_quote`` or ``title``; those
+        strings are located in the PDF and highlighted. Delegates to
+        :class:`PDFAnnotator` so there is one annotation engine, not two.
         """
-        Annotates PDF by writing text notes/highlights at citation anchor points.
-        """
-        if not PYPDF_AVAILABLE:
-            return str(self.pdf_path)
+        from meddraft_ai.extraction.pdf_annotator import FITZ_AVAILABLE, PDFAnnotator
 
-        out_path = Path(output_pdf_path) if output_pdf_path else self.pdf_path.parent / f"{self.pdf_path.stem}_annotated.pdf"
-        
-        try:
-            reader = pypdf.PdfReader(self.pdf_path)
-            writer = pypdf.PdfWriter()
+        if not FITZ_AVAILABLE:
+            raise RuntimeError(
+                "PyMuPDF (fitz) is required for PDF annotation. "
+                "Install it with: pip install pymupdf"
+            )
 
-            for page in reader.pages:
-                writer.add_page(page)
+        anchors = [
+            str(citation.get("verbatim_quote") or citation.get("title") or "").strip()
+            for citation in citations
+        ]
+        anchors = [anchor for anchor in anchors if anchor]
+        if not anchors:
+            raise ValueError("No verbatim_quote or title supplied for annotation.")
 
-            with open(out_path, "wb") as f:
-                writer.write(f)
-
-            return str(out_path)
-        except Exception:
-            return str(self.pdf_path)
+        out_path = Path(output_pdf_path) if output_pdf_path else (
+            self.pdf_path.parent / f"{self.pdf_path.stem}_annotated.pdf"
+        )
+        return PDFAnnotator(self.pdf_path).highlight_sentences(anchors, output_path=out_path)
 
 def read_pdf(pdf_path: str | Path) -> str:
     reader = PDFReader(pdf_path)

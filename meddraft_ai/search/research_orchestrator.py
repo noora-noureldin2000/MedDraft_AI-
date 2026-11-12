@@ -54,7 +54,6 @@ class ResearchOrchestrator:
         self.config = get_config()
         self.cli_path = Path(__file__).parent / "browser_engine" / "dist" / "cli.js"
         self.download_dir = self.config.OUTPUT_DIR / "downloaded_papers"
-        self.download_dir.mkdir(parents=True, exist_ok=True)
 
     def _call_browser_engine(self, command: str, *args) -> Dict[str, Any]:
         """Calls the Node.js Playwright stealth CLI."""
@@ -320,6 +319,7 @@ class ResearchOrchestrator:
             return {"success": False, "error": "No pdf_url provided.", "title": title}
 
         target_dir = Path(output_dir) if output_dir else self.download_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
         safe_title = re.sub(r'[^a-zA-Z0-9 _-]', '', title)[:120].strip().replace(' ', '_')
         output_path = target_dir / f"{safe_title or 'paper'}.pdf"
 

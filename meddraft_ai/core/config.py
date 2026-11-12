@@ -75,7 +75,13 @@ def load_config() -> Config:
                             p = default_config.WORKSPACE_ROOT / p
                         setattr(default_config, key, p)
                     elif isinstance(getattr(default_config, key), bool):
-                        setattr(default_config, key, bool(val))
+                        # config.json may carry booleans as "false"/"no" strings;
+                        # bool("false") would incorrectly evaluate to True.
+                        if isinstance(val, str):
+                            setattr(default_config, key, val.strip().lower() in ("1", "true", "yes", "on"))
+                        else:
+                            setattr(default_config, key, bool(val))
+
                     else:
                         setattr(default_config, key, val)
         except Exception as e:

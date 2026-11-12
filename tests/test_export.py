@@ -152,3 +152,24 @@ class TestMarkdownDocxConverterInlineParser:
         italic = [r for p in doc.paragraphs for r in p.runs if r.italic]
         assert bold
         assert italic
+
+
+# ---------------------------------------------------------------------------
+# Pandoc post-processing
+# ---------------------------------------------------------------------------
+
+def test_manuscript_style_applied_to_pandoc_output(tmp_path):
+    """Pandoc's default reference document is not manuscript style; we force it."""
+    from meddraft_ai.export.pandoc_converter import _apply_manuscript_style
+
+    template = tmp_path / "pandoc_like.docx"
+    document = Document()
+    document.add_paragraph("Body")
+    document.save(str(template))
+
+    _apply_manuscript_style(template)
+
+    normal = Document(str(template)).styles["Normal"]
+    assert normal.font.name == "Times New Roman"
+    assert normal.font.size.pt == 12
+    assert normal.paragraph_format.line_spacing == 2.0

@@ -72,10 +72,8 @@ _SECONDARY_KEYWORDS = [
     "resolve reference",
     "resolve secondary",
     "truncated author",
-    "et al",
     "unlisted in",
     "bibliography entry",
-    "reference list",
 ]
 
 # Reference-section heading detector.
@@ -89,7 +87,6 @@ _ENTRY_START = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[\.\)])\s+(.*)$")
 
 _DOI_RE = re.compile(r"10\.\d{4,}/[^\s,;\]\)\"']+")
 _PMID_RE = re.compile(r"PMID[:\s]*(\d{7,8})", re.IGNORECASE)
-_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 
 
 # ---------------------------------------------------------------------------
@@ -256,12 +253,9 @@ class SecondaryCitationExtractor:
                 if len(line) > 25 and not line.lower().startswith(("page", "---")):
                     container.title = line[:250]
                     break
-        years = _YEAR_RE.findall(head)
+        years = re.findall(r"\b(?:19|20)\d{2}\b", head)
         if years and not container.year:
-            try:
-                container.year = int(years[-1] if isinstance(years[-1], str) else "".join(years[-1]))
-            except (ValueError, TypeError):
-                pass
+            container.year = int(years[-1])
         if isinstance(metadata.get("year"), int):
             container.year = metadata["year"]
         return container

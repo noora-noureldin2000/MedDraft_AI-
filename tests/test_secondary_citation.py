@@ -54,6 +54,13 @@ class TestAutoTrigger:
             "The sky is blue and water is wet."
         ) is False
 
+    def test_ordinary_paper_prose_does_not_trigger(self):
+        """'et al.' and 'reference list' alone are not secondary-citation work."""
+        assert SecondaryCitationExtractor.should_trigger(
+            "Smith et al. randomized 240 patients. The reference list was "
+            "checked for completeness by two reviewers."
+        ) is False
+
     def test_match_score_orders_correctly(self):
         strong = SecondaryCitationExtractor.match_score(
             "Trace this nested citation and build a dual bibliography, as cited in Smith (2020)"

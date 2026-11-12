@@ -126,7 +126,16 @@ class SemanticDocumentChunker:
             # Matches line starting with the section name (e.g. 'Methods: ...' or 'Results - ...')
             if re.match(r"^" + pattern + r"[\s:\-–—\.]", clean, re.IGNORECASE):
                 return bucket
-            # Matches standalone short header line (e.g. 'Study Design and Methods')
-            if len(clean) < 60 and re.search(pattern, clean, re.IGNORECASE):
+            # Matches a standalone short header line (e.g. 'Study Design and Methods').
+            # Body sentences such as 'A total of 278 patients were enrolled.' are
+            # excluded: they end in a period and run past the header word count,
+            # and treating them as headers would resegment results into Methods.
+            word_count = len(clean.split())
+            if (
+                len(clean) < 60
+                and word_count <= 8
+                and not clean.endswith((".", ";", ","))
+                and re.search(pattern, clean, re.IGNORECASE)
+            ):
                 return bucket
         return None

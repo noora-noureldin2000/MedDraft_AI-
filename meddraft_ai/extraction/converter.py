@@ -228,11 +228,17 @@ class DocumentConverterEngine:
             return f"[ERROR] Could not extract text from {self.pdf_path.name}"
 
     def extract_citation_metadata(self) -> Dict[str, str]:
+        from meddraft_ai.extraction.citation_tracker import (
+            DOI_PATTERN,
+            strip_doi_punctuation,
+        )
         text = self.markdown_text
         meta: Dict[str, str] = {}
-        doi_match = re.search(r"10\.\d{4,}/[-._;()/:a-zA-Z0-9]+", text)
+        doi_match = re.search(DOI_PATTERN, text)
         if doi_match:
-            meta["doi"] = doi_match.group(0)
+            doi = strip_doi_punctuation(doi_match.group(0))
+            if doi:
+                meta["doi"] = doi
 
         pmid_match = re.search(r"PMID[:\s]*(\d+)", text, re.IGNORECASE)
         if pmid_match:

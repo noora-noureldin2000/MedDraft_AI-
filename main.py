@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 def load_project_context(project_path: Path) -> str:
     """Read project Markdown sources for source-grounded drafting."""
     context_parts = []
-    for source_file in sorted(project_path.glob("*.md")):
+    for source_file in sorted(project_path.rglob("*.md")):
         try:
             content = source_file.read_text(encoding="utf-8")
         except OSError as err:
@@ -44,6 +44,57 @@ def load_project_context(project_path: Path) -> str:
             continue
         context_parts.append(f"\n--- PROJECT FILE: {source_file.name} ---\n{content}")
     return "".join(context_parts)
+
+
+def collect_draft_dois(draft: str) -> set[str]:
+    """Return every DOI-shaped token in the draft, punctuation stripped."""
+    from meddraft_ai.extraction.citation_tracker import (
+        DOI_PATTERN,
+        strip_doi_punctuation,
+    )
+    return {
+        doi
+        for match in re.finditer(DOI_PATTERN, draft)
+        if (doi := strip_doi_punctuation(match.group(0)))
+    }
+
+
+def _unverified_dois(draft: str, citations: list[dict]) -> list[str]:
+    """DOIs cited in the draft that no API confirmed."""
+    verified = {str(c.get("doi", "")).lower() for c in citations if c.get("doi")}
+    return sorted(doi for doi in collect_draft_dois(draft) if doi.lower() not in verified)
+
+
+def _write_reference_report(report_path: Path, citations: list[dict], unverified: list[str]) -> None:
+    report_path.write_text(
+        json.dumps(
+            {
+                "verified": citations,
+                "unverified_dois": unverified,
+                "note": (
+                    "Unverified DOIs may be hallucinated or may have failed "
+                    "live API validation; confirm before submission."
+                ),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def verify_and_report_references(draft: str, report_path: Path) -> tuple[int, list[str]]:
+    """Validate draft references live and persist an auditable report.
+
+    Returns the number of verified references and the DOIs present in the draft
+    that no API could confirm. Unverified DOIs are *flagged*, never silently
+    removed: a network outage and a hallucinated DOI look identical at this
+    layer, so the author decides.
+    """
+    citations = validate_references(draft)
+    unverified = _unverified_dois(draft, citations)
+    _write_reference_report(report_path, citations, unverified)
+    return len(citations), unverified
 
 @click.command()
 @click.option("--topic", default="", help="The medical topic or research question to write about.")
@@ -88,6 +139,8 @@ def main(
     """
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     config = get_config()
     if provider:
@@ -186,7 +239,7 @@ def main(
     project_context = ""
     if project_path and project_path.is_dir():
         project_context = load_project_context(project_path)
-        source_count = len(list(project_path.glob("*.md")))
+        source_count = len(list(project_path.rglob("*.md")))
         console.print(f"  Loaded [green]{source_count}[/] project Markdown file(s) from [green]{project_path}[/]")
 
     # --- Step 1: Deep Literature Search ---
@@ -316,8 +369,16 @@ def main(
 
     # --- Step 6: References Live Validation ---
     console.print("\n[bold blue]Phase 6: Live Reference Verification[/bold blue]")
-    citations = validate_references(full_draft)
-    console.print(f"  Verified [green]{len(citations)}[/green] references via CrossRef & PubMed APIs.")
+    reference_report = out_path / "reference_verification_report.json"
+    verified_count, unverified_dois = verify_and_report_references(full_draft, reference_report)
+    console.print(f"  Verified [green]{verified_count}[/green] references via CrossRef & PubMed APIs.")
+    if unverified_dois:
+        console.print(
+            f"  [bold red]⚠ {len(unverified_dois)} DOI(s) could not be verified[/bold red] "
+            f"(report: {reference_report.name})"
+        )
+        for doi in unverified_dois[:10]:
+            console.print(f"    [red]• {doi}[/red]")
 
     # --- Step 7: On-demand Humanization Pass ---
     if humanize:
@@ -326,8 +387,15 @@ def main(
         full_draft = humanizer.humanize(full_draft)
 
         # Humanization can alter citation formatting, so verify the final text.
-        citations = validate_references(full_draft)
-        console.print(f"  Final draft reference check returned [green]{len(citations)}[/] verified references.")
+        verified_count, unverified_dois = verify_and_report_references(full_draft, reference_report)
+        console.print(
+            f"  Final draft reference check returned [green]{verified_count}[/] verified references."
+        )
+        if unverified_dois:
+            console.print(
+                f"  [bold red]⚠ {len(unverified_dois)} DOI(s) still unverified[/bold red] "
+                f"(report: {reference_report.name})"
+            )
 
     # --- Step 8: Document Export ---
     console.print("\n[bold blue]Phase 8: Exporting Output Documents[/bold blue]")
@@ -335,9 +403,9 @@ def main(
     md_file = out_path / f"{safe_title}_manuscript.md"
     docx_file = out_path / f"{safe_title}_manuscript.docx"
 
-    # Write markdown once — shared by both md and docx paths
-    if output_format in ("md", "both", "docx"):
-        md_file.write_text(full_draft, encoding="utf-8")
+    # The Markdown is the canonical artifact: DOCX export reads it, so it is
+    # always written regardless of the requested output format.
+    md_file.write_text(full_draft, encoding="utf-8")
 
     if output_format in ("md", "both"):
         console.print(f"  [green]Markdown manuscript saved: {md_file}[/green]")

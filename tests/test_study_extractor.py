@@ -112,6 +112,29 @@ def test_verifier_catches_numeric_hallucination(sample_pages):
     assert "0.01" in err
 
 
+def test_verifier_numeric_fidelity_is_quote_scoped(sample_pages):
+    """A number found elsewhere on the page must not launder a fabricated value."""
+    verifier = GroundingVerifier(page_texts=sample_pages)
+    outcome = OutcomeMeasure(
+        outcome_name="Exacerbation",
+        intervention_result="999/120",  # not in the quoted sentence
+        comparator_result="48/120",
+        effect_size_metric="HR",
+        effect_size_value="0.52",
+        confidence_interval_95="0.32-0.84",
+        p_value="p = 0.007",
+    )
+    field = GroundedField[OutcomeMeasure](
+        status="REPORTED",
+        value=outcome,
+        verbatim_quote="Primary endpoint occurred in 25/120 (20.8%) patients in the Drug X group",
+        page_number=3,
+    )
+    ok, err = verifier.verify_field("primary_outcome", field)
+    assert ok is False
+    assert "999" in err
+
+
 def test_verifier_accepts_not_reported():
     verifier = GroundingVerifier(page_texts={1: "Short text."})
     field = GroundedField[str](status="NOT_REPORTED", value=None)
@@ -144,6 +167,35 @@ def test_verifier_downgrade_safety_valve(sample_pages):
     assert schema.sample_size_enrolled.verified_in_source is True
 
 
+def test_verifier_recurses_into_models_nested_in_lists(sample_pages):
+    """A BaseModel inside a list must still have its GroundedFields verified."""
+    class NestedFinding(BaseModel):
+        claim: GroundedField[str]
+
+    class Report(BaseModel):
+        findings: List[NestedFinding]
+
+    verifier = GroundingVerifier(page_texts=sample_pages)
+    report = Report(findings=[
+        NestedFinding(
+            claim=GroundedField[str](
+                status="REPORTED",
+                value="invented",
+                verbatim_quote="this sentence is not in the paper",
+                page_number=3,
+            )
+        )
+    ])
+
+    errors = verifier.verify_model(report)
+    assert len(errors) == 1
+    assert "findings[0].claim" in errors[0]
+    assert report.findings[0].claim.verified_in_source is False
+
+    verifier.downgrade_unverified_fields(report)
+    assert report.findings[0].claim.status == "UNCLEAR"
+
+
 # ---------------------------------------------------------------------------
 # 3. SemanticDocumentChunker Tests
 # ---------------------------------------------------------------------------
@@ -157,6 +209,15 @@ def test_chunker_text_fallback(sample_pages):
     assert "discussion" in buckets
     assert any("240 patients" in c["text"] for c in buckets["abstract_intro"])
     assert any("randomized 1:1" in c["text"] for c in buckets["methods"])
+
+
+def test_chunker_headers_only_not_body_sentences():
+    """Body sentences mentioning IMRaD nouns must not resegment the document."""
+    chunker = SemanticDocumentChunker()
+    assert chunker._match_section_header("Methods") == "methods"
+    assert chunker._match_section_header("## Study Design and Methods") == "methods"
+    assert chunker._match_section_header("A total of 278 patients were enrolled.") is None
+    assert chunker._match_section_header("Study outcomes were assessed.") is None
 
 
 # ---------------------------------------------------------------------------

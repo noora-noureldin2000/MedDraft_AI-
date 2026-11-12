@@ -1136,9 +1136,6 @@ Examples:
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
-
 def validate_doi(doi: str) -> dict:
     from meddraft_ai.extraction.citation_tracker import CitationVerifier
     res = CitationVerifier.verify_doi(doi)
@@ -1153,4 +1150,8 @@ def validate_references(text: str) -> list[dict]:
     from meddraft_ai.extraction.citation_tracker import CitationVerifier
     results = CitationVerifier.extract_and_verify(text)
     return [r.to_dict() for r in results]
+
+
+if __name__ == "__main__":
+    main()
 

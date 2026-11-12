@@ -11,16 +11,18 @@ class ProviderRouter:
     def __init__(self):
         self.config = get_config()
 
-    def is_vision_task(self, prompt: str, image_path: Optional[str] = None) -> bool:
-        if image_path:
-            return True
-        keywords = ["chart", "plot", "figure", "diagram", "table image", "flowchart", "image"]
-        p_lower = prompt.lower()
-        return any(kw in p_lower for kw in keywords)
+    def is_vision_task(self, image_path: Optional[str] = None) -> bool:
+        """A task is visual only when an actual image accompanies it.
+
+        Prompt keywords are not enough: a text request that merely mentions a
+        figure has no pixels to inspect, and routing it to the local vision
+        model would produce an image-less request.
+        """
+        return bool(image_path)
 
     def route(self, prompt: str, image_path: Optional[str] = None) -> Dict[str, Any]:
         if self.config.LLM_PROVIDER.lower() == "dual" and self.config.VISION_ROUTING_ENABLED:
-            if self.is_vision_task(prompt, image_path):
+            if self.is_vision_task(image_path):
                 return {
                     "provider": self.config.VISION_PROVIDER,
                     "model": self.config.VISION_MODEL,

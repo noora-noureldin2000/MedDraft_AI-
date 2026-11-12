@@ -107,7 +107,12 @@ def search_sciencedirect_api(query: str, limit: int = 10) -> str:
             return json.dumps({"source": "ScienceDirect", "query": query, "error": "SCIENCEDIRECT_API_KEY not configured", "count": 0, "results": []}, indent=2, ensure_ascii=False)
 
         quoted_query = urllib.parse.quote_plus(query)
-        url = f"https://api.elsevier.com/content/search/sciencedirect?query={quoted_query}&count={limit}"
+        # Elsevier requires a fielded query; a bare term string is rejected.
+        url = (
+            f"https://api.elsevier.com/content/search/sciencedirect"
+            f"?query=TITLE-ABS-KEY({quoted_query})&count={limit}"
+        )
+
 
         req = urllib.request.Request(url, headers={
             'Accept': 'application/json', 'X-ELS-APIKey': api_key, 'User-Agent': 'MedDraft_AI/1.0'
