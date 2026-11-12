@@ -144,7 +144,7 @@ node meddraft_ai/search/browser_engine/dist/cli.js click <url> <id>
 
 ## 🧠 Agent Skills & Prompt Packs
 
-The repo carries two skill layers, both wired into the project's "brain":
+Three skill layers are wired into the pipeline:
 
 **Agent skills (`.agents/skills/`)** — quality gates and compliance guides applied to AI-assisted work in this repository. They are pinned in `skills-lock.json` (the `npx skills` lockfile format), and `tests/test_skills_lock.py` verifies every installed skill directory has a matching lock entry:
 
@@ -160,9 +160,8 @@ The repo carries two skill layers, both wired into the project's "brain":
 | `surgical-word-reduction` | 3-pass surgical word-count reduction (structural trim → syntactic tightening → micro-polish) with section protocols, replacement dictionary, and preservation checklist |
 | `academic-search-agent` | Three-phase Scholar playbook: breadth angles → authoritative deep-reads → single-question iteration with word budgets |
 | `pdf` | PDF toolkit: layout-aware text/table extraction, scanned-PDF OCR fallback, merge/split/rotate/metadata, and fillable or annotation-based form filling (mirrored in `meddraft_ai/prompts/pdf/`) |
-| `wp-guard` / `woo-guard` | WordPress / WooCommerce code review gates (kept from the shared guard-skills toolkit) |
 
-**Nature Paper Skills layer (20 vendored skills, additive)** — manuscript integrity, revision, and submission skills from [Boom5426/Nature-Paper-Skills](https://github.com/Boom5426/Nature-Paper-Skills) (upstream v0.2.0; MIT + Apache-2.0, see `meddraft_ai/prompts/nature-paper-skills/`). Nothing existing was removed. Wiring: `meddraft_ai/core/nature_integration.py`, auto-routed by `match_skill_for_task()`, carried by the existing specialists plus the new `RebuttalSpecialist`:
+**Nature Paper Skills layer (20 skills)** — manuscript integrity, revision, and submission skills from [Boom5426/Nature-Paper-Skills](https://github.com/Boom5426/Nature-Paper-Skills) (upstream v0.2.0; MIT + Apache-2.0, see `meddraft_ai/prompts/nature-paper-skills/`). Wiring: `meddraft_ai/core/nature_integration.py`, auto-routed by `match_skill_for_task()`, carried by the existing specialists plus the new `RebuttalSpecialist`:
 
 | Skills | Role |
 |---|---|
@@ -186,8 +185,6 @@ The repo carries two skill layers, both wired into the project's "brain":
 `academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
 
 Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `arabic-mixed-rtl.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically. `arabic-mixed-rtl.md` is a standalone skill selected by script detection rather than topic keywords: any request mixing Arabic and Latin letters, or naming Arabic/RTL formatting for a document, routes to it (see `meddraft_ai/core/language_routing.py` and `tests/test_skill_registry.py`).
-
-**Evaluated but not integrated** (additive-only policy respected; reasons recorded): `kesslerio/academic-deep-research` is already covered by the repo's local `academic-deep-research` skill + `DeepResearchSpecialist`; `dayunyan/academic-writer` was rejected (VirusTotal Suspicious flag, requires 4–7 GB texlive + Linux + an external hub skill, while Pandoc/DOCX export already covers output); `nimhar/aclawdemy` was rejected (VirusTotal Suspicious, external agent-publishing platform with API registration — conflicts with the zero-hallucination clinical posture); `huaruoji/research-report` was rejected (VirusTotal + OpenClaw Suspicious flags, texlive/conda/CUDA requirements, overlaps the existing export + 5-pass SciWrite audit). From `Boom5426/Nature-Paper-Skills` (27 skills evaluated), 20 were integrated (see table above) and 7 deliberately skipped: `paper-workflow` router (conflicts with `match_skill_for_task`; contracts vendored as references instead), `scientific-writing` (overlaps `academic-writing`), `nature-figure` production (heavy backend; planner + style cover the need), `academic-researcher` (duplicates `research_surfer`), `conference-paper-writing` / `academic-presentations` (out of scope), `reference-audit-guide` (overlaps live validation + claim-source checks).
 
 ---
 
