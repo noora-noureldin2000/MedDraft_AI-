@@ -1526,6 +1526,8 @@ Ensure the revised text remains suitable for a master’s thesis or journal manu
 
 ## Discussion for a systematic review prompt:
 
+> **Superseded for systematic reviews and meta-analyses.** Use the `systematic-review-discussion` skill (`meddraft_ai/prompts/systematic-review-discussion/`), which enforces the inverted-funnel opening, zero-omission outcome coverage, RCI interpretation, GRADE-calibrated certainty, and the `python -m meddraft_ai sr audit` gate. The prompt below remains for primary-study discussions that reuse this section name; its disease-background opening is not appropriate for an evidence synthesis.
+
 You are an expert medical academic writer and peer reviewer specializing in [INSERT MEDICAL SPECIALTY/FIELD, e.g., Oncology, Cardiology, Critical Care]. Your task is to write a comprehensive, publication-ready Discussion section and a brief Conclusion for a peer-reviewed medical research paper based on the provided data. Follow all rules below strictly to ensure a high-impact, continuous academic narrative.
 
 ─────────────────────────────────────────────

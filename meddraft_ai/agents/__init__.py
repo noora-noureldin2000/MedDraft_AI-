@@ -7,7 +7,8 @@ from .specialists import (
     ReferencesSpecialist,
     DeepResearchSpecialist,
     AcademicPaperSpecialist,
-    MedPaperAssistantSpecialist
+    MedPaperAssistantSpecialist,
+    SystematicReviewDiscussionSpecialist,
 )
 from .medical_writer_agent import MedicalWriterAgent
 
@@ -21,5 +22,6 @@ __all__ = [
     "DeepResearchSpecialist",
     "AcademicPaperSpecialist",
     "MedPaperAssistantSpecialist",
+    "SystematicReviewDiscussionSpecialist",
     "MedicalWriterAgent"
 ]

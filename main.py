@@ -24,14 +24,48 @@ from meddraft_ai.extraction.pdf_reader import PDFReader
 from meddraft_ai.agents.specialists import (
     CoreWriterSpecialist,
     HumanizerSpecialist,
-    ProofReaderSpecialist
+    ProofReaderSpecialist,
+    SystematicReviewDiscussionSpecialist,
 )
 from meddraft_ai.agents.medical_writer_agent import MedicalWriterAgent
+from meddraft_ai.core.sr_discussion import (
+    audit_discussion,
+    check_numeric_fidelity,
+    inventory_project,
+    read_source_texts,
+)
 from meddraft_ai.validation.reference_validator import validate_references
 from meddraft_ai.export.pandoc_converter import convert_markdown_to_docx
 
 console = Console()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Injected into the Discussion prompt for systematic reviews and meta-analyses.
+# The full contract lives in meddraft_ai/prompts/systematic-review-discussion/;
+# this directive names the non-negotiable gates so the draft is auditable.
+SR_DISCUSSION_DIRECTIVE = (
+    "\n\nApply the systematic-review-discussion skill to this Discussion.\n"
+    "- Start by restating the complete workspace inventory and the Master Evidence Summary Table "
+    "(included studies and every pooled outcome with estimate, 95% CI, p value, I2).\n"
+    "- Discuss every primary outcome, secondary outcome, subgroup, sensitivity analysis, and safety "
+    "or laboratory outcome. Group by domain if useful. Never omit a null or unfavourable result. "
+    "Mark any outcome that was not pooled as NOT_POOLED or NOT_REPORTED.\n"
+    "- Block order: principal findings, time-course efficacy and mechanism, target attainment, "
+    "comparison with prior reviews and landmark trials, safety and laboratory profile, clinical "
+    "implications and guideline alignment, strengths and limitations, future research, conclusions.\n"
+    "- For every outcome domain use Restate, Compare, Interpret. Explain discrepancies by population, "
+    "intervention or comparator, methodology, or power and measurement.\n"
+    "- Interpret I2 with tau2 and the prediction interval where available. Do not recite heterogeneity "
+    "without explaining what it means for applicability.\n"
+    "- Calibrate every certainty claim to GRADE: high shows, moderate likely, low may, very low very "
+    "uncertain. State explicitly if GRADE was not performed.\n"
+    "- Split limitations into study-level and review-level, each as State, Impact, Mitigate. "
+    "No apologetic wording.\n"
+    "- Make future research specific: population, intervention and comparator, design, outcome, "
+    "duration. Never write that more research is needed.\n"
+    "- Prose: zero em dashes, no banned AI vocabulary, no study-by-study laundry lists. Cite in the "
+    "requested style and never invent, round, or transpose a number."
+)
 
 def load_project_context(project_path: Path) -> str:
     """Read project Markdown sources for source-grounded drafting."""
@@ -44,6 +78,37 @@ def load_project_context(project_path: Path) -> str:
             continue
         context_parts.append(f"\n--- PROJECT FILE: {source_file.name} ---\n{content}")
     return "".join(context_parts)
+
+
+def load_tabular_evidence(project_path: Path, max_chars: int = 60000) -> str:
+    """Read CSV/TSV/JSON evidence files (pooled tables) for SR/MA drafting.
+
+    Markdown is already covered by ``load_project_context``. Meta-analysis
+    folders commonly store pooled estimates as CSV or JSON, so those formats
+    must be visible to the Discussion writer instead of being silently ignored.
+    """
+    parts: list[str] = []
+    budget = max_chars
+    for source_file in sorted(project_path.rglob("*")):
+        if not source_file.is_file():
+            continue
+        if source_file.suffix.lower() not in {".csv", ".tsv", ".json"}:
+            continue
+        if budget <= 0:
+            break
+        try:
+            content = source_file.read_text(encoding="utf-8", errors="replace")
+        except OSError as err:
+            logging.warning("Could not read data file %s: %s", source_file, err)
+            continue
+        snippet = content[: min(len(content), budget, 15000)]
+        try:
+            label = source_file.relative_to(project_path)
+        except ValueError:
+            label = source_file
+        parts.append(f"\n--- DATA FILE: {label} ---\n{snippet}")
+        budget -= len(snippet)
+    return "".join(parts)
 
 
 def collect_draft_dois(draft: str) -> set[str]:
@@ -114,6 +179,7 @@ def verify_and_report_references(draft: str, report_path: Path) -> tuple[int, li
 @click.option("--out", default=None, help="Output JSON path for --parse-pdf extraction.")
 @click.option("--annotated-pdf", default=None, help="Output highlighted PDF path for --parse-pdf.")
 @click.option("--project-dir", default=None, help="Directory containing protocol, results, and discussion notes.")
+@click.option("--sr-require", multiple=True, help="Outcome label that the SR/MA Discussion audit must find (repeatable).")
 @click.option("--provider", default=None, type=click.Choice(["dual", "simple"]), help="LLM provider mode.")
 @click.option("--verbose", is_flag=True, default=False, help="Enable verbose log output.")
 def main(
@@ -131,6 +197,7 @@ def main(
     out: str,
     annotated_pdf: str,
     project_dir: str,
+    sr_require: tuple,
     provider: str,
     verbose: bool
 ):
@@ -226,6 +293,7 @@ def main(
     ))
 
     evidence_summary = ""
+    sr_mode = manuscript_type in ("systematic-review", "meta-analysis")
 
     # Use the PDF's parent as the project directory when available. This keeps
     # the documented PDF command useful even when the source PDF is accompanied
@@ -237,10 +305,23 @@ def main(
             project_path = candidate
 
     project_context = ""
+    evidence_manifest = ""
+    tabular_evidence = ""
     if project_path and project_path.is_dir():
         project_context = load_project_context(project_path)
         source_count = len(list(project_path.rglob("*.md")))
         console.print(f"  Loaded [green]{source_count}[/] project Markdown file(s) from [green]{project_path}[/]")
+
+        # Step 0 of the SR/MA Discussion skill: prove the whole workspace was
+        # inspected, and expose CSV/JSON pooled tables that Markdown loading misses.
+        if sr_mode:
+            inventory = inventory_project([project_path])
+            evidence_manifest = inventory.to_markdown()[:8000]
+            tabular_evidence = load_tabular_evidence(project_path)
+            console.print(
+                f"  SR/MA evidence inventory: [green]{len(inventory.files)}[/] file(s) "
+                f"across {len(inventory.categories)} categories."
+            )
 
     # --- Step 1: Deep Literature Search ---
     console.print("\n[bold blue]Phase 1: Multi-Stage Literature Search[/bold blue]")
@@ -331,16 +412,21 @@ def main(
 
     # --- Step 4: Core Manuscript Drafting ---
     console.print("\n[bold blue]Phase 4: Sequential IMRAD Manuscript Drafting[/bold blue]")
-    writer_agent = CoreWriterSpecialist()
+    writer_agent = (
+        SystematicReviewDiscussionSpecialist() if sr_mode else CoreWriterSpecialist()
+    )
     
     section_list = [
         "Title and Abstract", "Introduction", "Literature Review",
         "Methodology", "Results", "Discussion", "Conclusion & Future Work"
     ] if sections == "all" else [s.strip() for s in sections.split(",")]
-    if sections == "all" and manuscript_type == "thesis" and project_context:
+    if sections == "all" and manuscript_type in ("thesis", "systematic-review", "meta-analysis") and project_context:
+        # These document types are source-grounded: never regenerate protocol
+        # or Results text from memory when the authoritative files are present.
         section_list = ["Discussion", "References"]
 
     manuscript_draft_parts = [f"# {topic.title()}\n"]
+    discussion_text = ""
 
     for sec in section_list:
         console.print(f"  Drafting section: [yellow]{sec}[/yellow]...")
@@ -357,15 +443,73 @@ def main(
                 f"Synthesize the following verified literature evidence:\n{evidence_summary}\n"
                 f"PROJECT MATERIALS:\n{project_context}"
             )
-            sec_text = writer_agent.execute(prompt)
+            if sr_mode:
+                prompt += SR_DISCUSSION_DIRECTIVE
+                if evidence_manifest:
+                    prompt += f"\n\nWORKSPACE EVIDENCE INVENTORY (Step 0 proof):\n{evidence_manifest}"
+                if tabular_evidence:
+                    prompt += f"\n\nPOOLED / TABULAR EVIDENCE FILES:\n{tabular_evidence}"
+
+            if sr_mode and sec.lower() == "discussion":
+                sec_text = writer_agent.draft(prompt)
+                discussion_text = sec_text
+            else:
+                sec_text = writer_agent.execute(prompt)
             manuscript_draft_parts.append(f"## {sec}\n\n{sec_text}\n")
 
     full_draft = "\n".join(manuscript_draft_parts)
 
+    # --- Step 4b: SR/MA Discussion quality gate (deterministic) ---
+    sr_audit = None
+    fidelity = None
+    if sr_mode and discussion_text:
+        console.print("\n[bold blue]Phase 4b: Systematic-Review Discussion Quality Gate[/bold blue]")
+        sr_audit = audit_discussion(
+            discussion_text,
+            required_outcomes=list(sr_require) or None,
+        )
+        (out_path / "sr_discussion_audit.json").write_text(
+            json.dumps(sr_audit.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        console.print(
+            f"  Words: {sr_audit.word_count} | Errors: [red]{len(sr_audit.errors)}[/] | "
+            f"Warnings: [yellow]{len(sr_audit.warnings)}[/]"
+        )
+        for finding in sr_audit.errors[:10]:
+            console.print(f"    [red]• {finding.code}: {finding.message}[/red]")
+        for finding in sr_audit.warnings[:6]:
+            console.print(f"    [yellow]• {finding.code}: {finding.message}[/yellow]")
+
+        if project_path and project_path.is_dir():
+            source_texts = read_source_texts([project_path])
+            fidelity = check_numeric_fidelity(discussion_text, source_texts)
+            (out_path / "sr_discussion_fidelity.json").write_text(
+                json.dumps(fidelity.to_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            console.print(
+                f"  Numeric fidelity: {len(fidelity.matched)} matched, "
+                f"[yellow]{len(fidelity.unmatched)}[/] token(s) not found in the evidence files."
+            )
+
     # --- Step 5: Proofreading & Scientific Prose Audit ---
     console.print("\n[bold blue]Phase 5: Scientific Prose Audit (5-Pass SciWrite)[/bold blue]")
     proofreader = ProofReaderSpecialist()
-    full_draft = proofreader.execute(f"Audit and polish this manuscript draft for active voice, clarity, and keyword consistency:\n\n{full_draft}")
+    proof_prompt = (
+        "Audit and polish this manuscript draft for active voice, clarity, and "
+        f"keyword consistency:\n\n{full_draft}"
+    )
+    if sr_audit and sr_audit.errors:
+        gate_lines = "\n".join(
+            f"- {finding.code}: {finding.message}" for finding in sr_audit.errors
+        )
+        proof_prompt += (
+            "\n\nThis is a systematic-review Discussion. Resolve these skill-gate errors "
+            "without changing any number, statistic, or citation, and without adding new claims:\n"
+            f"{gate_lines}"
+        )
+    full_draft = proofreader.execute(proof_prompt)
 
     # --- Step 6: References Live Validation ---
     console.print("\n[bold blue]Phase 6: Live Reference Verification[/bold blue]")

@@ -6,11 +6,19 @@ Primary usage from the research-surfer skill:
     python -m meddraft_ai refs scholar-search "query" --limit 5
     python -m meddraft_ai refs deep-dive "doi_or_pmid_or_json"
     python -m meddraft_ai refs download '{"title": "...", "pdf_url": "..."}'
+
+Systematic-review Discussion tools:
+
+    python -m meddraft_ai sr inventory "path/to/study" --json
+    python -m meddraft_ai sr audit "discussion.md" --require "MSSBP week 8"
+    python -m meddraft_ai sr fidelity --draft "discussion.md" --source "path/to/meta"
+    python -m meddraft_ai sr brief --spec "study_spec.json"
 """
 
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -81,14 +89,134 @@ def build_parser() -> argparse.ArgumentParser:
     )
     angles.add_argument("query", help="Research topic string.")
 
+    sr = sub.add_parser(
+        "sr",
+        help="Systematic-review Discussion tools: workspace inventory, gate audit, numeric fidelity, brief builder.",
+    )
+    sr_sub = sr.add_subparsers(dest="sr_command")
+
+    sr_inv = sr_sub.add_parser(
+        "inventory", help="List and classify every file in a study workspace."
+    )
+    sr_inv.add_argument("paths", nargs="+", help="Files or directories to inventory.")
+    sr_inv.add_argument("--json", action="store_true", help="Emit JSON instead of Markdown.")
+
+    sr_audit = sr_sub.add_parser(
+        "audit", help="Audit a systematic-review Discussion against the skill gates."
+    )
+    sr_audit.add_argument("draft", help="Path to the Discussion Markdown file.")
+    sr_audit.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        help="Outcome label that must appear in the draft (repeatable).",
+    )
+    sr_audit.add_argument("--min-words", type=int, default=1500)
+    sr_audit.add_argument("--max-words", type=int, default=3000)
+    sr_audit.add_argument("--json", action="store_true", help="Emit JSON instead of Markdown.")
+
+    sr_fid = sr_sub.add_parser(
+        "fidelity", help="Check draft quantitative tokens against the evidence files."
+    )
+    sr_fid.add_argument("--draft", required=True, help="Path to the Discussion Markdown file.")
+    sr_fid.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        required=True,
+        help="Evidence file or directory (repeatable).",
+    )
+    sr_fid.add_argument("--json", action="store_true", help="Emit JSON instead of Markdown.")
+
+    sr_brief = sr_sub.add_parser(
+        "brief", help="Render a plug-and-play system command from a JSON study spec."
+    )
+    sr_brief.add_argument(
+        "--spec",
+        required=True,
+        help="JSON spec: title, population, intervention, comparator, outcomes, timepoint, workspace, output.",
+    )
+    sr_brief.add_argument("--out", default=None, help="Write to this file instead of stdout.")
+
     return parser
+
+
+def _run_sr(args: argparse.Namespace) -> int:
+    """Dispatch the ``sr`` tool group. Network-free and side-effect limited."""
+    from meddraft_ai.core.sr_discussion import (
+        audit_discussion,
+        build_system_command,
+        check_numeric_fidelity,
+        inventory_project,
+        load_spec,
+        read_source_texts,
+    )
+
+    try:
+        if args.sr_command == "inventory":
+            inventory = inventory_project(args.paths)
+            if args.json:
+                print(json.dumps(inventory.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(inventory.to_markdown())
+            return 0
+
+        if args.sr_command == "audit":
+            text = Path(args.draft).read_text(encoding="utf-8")
+            report = audit_discussion(
+                text,
+                required_outcomes=args.require or None,
+                min_words=args.min_words,
+                max_words=args.max_words,
+            )
+            if args.json:
+                print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(report.to_markdown())
+            return 0 if report.passed else 1
+
+        if args.sr_command == "fidelity":
+            draft = Path(args.draft).read_text(encoding="utf-8")
+            report = check_numeric_fidelity(
+                draft, read_source_texts(args.source, exclude=[args.draft])
+            )
+            if args.json:
+                print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(report.to_markdown())
+            return 0 if report.passed else 1
+
+        if args.sr_command == "brief":
+            command = build_system_command(load_spec(args.spec))
+            if args.out:
+                Path(args.out).write_text(command, encoding="utf-8")
+                print(json.dumps({"success": True, "path": args.out}, indent=2))
+            else:
+                print(command)
+            return 0
+
+        print(
+            json.dumps(
+                {
+                    "error": "No sr subcommand given. Use inventory, audit, fidelity or brief."
+                },
+                indent=2,
+            )
+        )
+        return 1
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.command == "sr":
+        return _run_sr(args)
+
     if args.command != "refs":
-        print(json.dumps({"error": "Unknown command. Use 'refs'."}, indent=2))
+        print(json.dumps({"error": "Unknown command. Use 'refs' or 'sr'."}, indent=2))
         return 1
 
     try:

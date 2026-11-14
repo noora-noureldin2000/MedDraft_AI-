@@ -35,6 +35,7 @@ This playbook contains ready-to-paste prompts that unlock **every feature** of t
 | Extraction prompts (code contracts, NOT registry packs) | `meddraft_ai/prompts/study_extraction_prompts.py` (`CORE_GROUNDING_RULES`, `METHODS/RESULTS/DISCUSSION/SYNTHESIS_SYSTEM_PROMPT` — imported directly by `StudyExtractor`) |
 | Citation extraction + verification (CitationAnchor) | `meddraft_ai/extraction/citation_tracker.py` |
 | Nested/secondary citation tracing + dual attribution | `meddraft_ai/extraction/secondary_citation.py` (`SecondaryCitationExtractor`); auto-runs in `main.py` Phase 2b (max 5 claims) |
+| SR/MA Discussion inventory, gate audit, numeric fidelity, brief builder | `meddraft_ai/core/sr_discussion.py` → `python -m meddraft_ai sr inventory|audit|fidelity|brief`; auto-runs in `main.py` Phases 4/4b for `--type systematic-review` or `meta-analysis` |
 | 5-tier reference validation (CrossRef/S2/OpenAlex/PubMed/arXiv) | `meddraft_ai/validation/reference_validator.py` |
 | Offline `.bib` hygiene (duplicate keys, DOI syntax, cited-vs-defined) | `meddraft_ai/prompts/citation-verifier/scripts/` (`audit_bib.py`, `scan_citations.py`, `citation_syntax.py`) |
 | Semantic claim→source support check (existence ≠ support) | `meddraft_ai/prompts/claim-source-verification/` |
@@ -592,6 +593,118 @@ the exclusion-reason tallies, a Methods search-strategy paragraph, and (if reque
 trials appendix table. Every included study must be DOI-verified AND support-checked.
 ```
 > 💡 The CLI equivalent: `python main.py --topic "[INSERT_TOPIC]" --type systematic-review`. For scoping/meta-analysis variants use `--type scoping-review` / `--type meta-analysis` (same screening backbone; review-article-architecture skill governs scoping surveys).
+
+---
+
+## Master Prompt 2B — Systematic Review & Meta-Analysis Discussion Architect
+
+**Purpose:** Write the Discussion of a systematic review or meta-analysis from its own protocol, included studies, and pooled outputs, with every outcome discussed, certainty language calibrated to GRADE, and a deterministic audit before delivery. Works for any study: swap the paths and PICO.
+
+**Repo features:** `.agents/skills/systematic-review-discussion/` (agent entry point) + `meddraft_ai/prompts/systematic-review-discussion/` (full contract, six references, evidence tables); `meddraft_ai/core/sr_discussion.py` (routing, inventory, audit, numeric fidelity, brief builder); `main.py --type systematic-review|meta-analysis --project-dir ... --sr-require ...` (Phases 4 and 4b); `python -m meddraft_ai sr` CLI; `claim-source-verification`, `stats-reporting-audit`, `citation-verifier`, `scientific-prose-style` (plus `anti-defensive-writing` when a de-audit pass is requested), `humanizer_noora`, and `meddraft_ai/validation/reference_validator.py`.
+
+**Run before/after the prompt:**
+```bash
+# 1. Prove the workspace inventory (protocol, included RCTs, meta outputs, prior reviews)
+python -m meddraft_ai sr inventory "[INSERT_STUDY_ROOT]" --json
+
+# 2. Optional: render a ready-to-paste system command from a JSON spec
+python -m meddraft_ai sr brief --spec "[INSERT_STUDY_SPEC_JSON]" --out "[INSERT_BRIEF_PATH]"
+
+# 3. Draft through the pipeline (SR/MA Discussion mode + humanization)
+python main.py --topic "[INSERT_STUDY_TITLE]" --type systematic-review \
+  --project-dir "[INSERT_STUDY_ROOT]" \
+  --sr-require "MSSBP week 8" --sr-require "BP control rate" \
+  --sr-require "serious adverse events" --humanize --output-dir outputs
+
+# 4. Gate the result (errors fail the build; warnings need a decision)
+python -m meddraft_ai sr audit "[INSERT_DISCUSSION_MD]" \
+  --require "MSSBP week 8" --require "serious adverse events" --min-words 1500 --max-words 3000
+
+# 5. Confirm every quantitative token exists in the evidence files
+python -m meddraft_ai sr fidelity --draft "[INSERT_DISCUSSION_MD]" \
+  --source "[INSERT_META_DIR]" --source "[INSERT_INCLUDED_DIR]"
+```
+
+```text
+⚙️ System Command: Publication-Grade Systematic Review & Meta-Analysis Discussion Architect (MedDraft_AI)
+
+<ROLE_AND_OBJECTIVE>
+You are an elite medical writer, biostatistical synthesizer, and evidence-verification
+agent operating inside the MedDraft_AI repository. Inspect the local study workspace,
+extract every pooled meta-analysis output and included-study finding, verify external
+literature, and write a publication-grade Discussion for the study below. Operate under
+a strict zero-hallucination policy: every pooled estimate, 95% CI, p value, I², tau²,
+and external claim must be anchored to a project file or a live-verified reference.
+</ROLE_AND_OBJECTIVE>
+
+<STUDY>
+Title: [INSERT_STUDY_TITLE]
+Population: [INSERT_POPULATION]
+Intervention: [INSERT_INTERVENTION_AND_DOSES]
+Comparator: [INSERT_COMPARATOR]
+Primary outcome and timepoint: [INSERT_PRIMARY_OUTCOME_AND_TIMEPOINT]
+Secondary outcomes: [INSERT_SECONDARY_OUTCOMES_AND_TIMEPOINTS]
+Safety and laboratory outcomes: [INSERT_SAFETY_AND_LAB_OUTCOMES]
+</STUDY>
+
+<WORKSPACE>
+Protocol and eligibility: [INSERT_PROTOCOL_PATH]
+Included studies: [INSERT_INCLUDED_STUDIES_DIR]
+Meta-analysis outputs: [INSERT_META_DIR]
+Prior systematic reviews: [INSERT_PRIOR_REVIEWS_DIR]
+Output: [INSERT_OUTPUT_PATH] (plus a backup in outputs/)
+</WORKSPACE>
+
+<EXECUTION>
+Phase 1 — Audit and extraction
+- Run `python -m meddraft_ai sr inventory ...` and list every file before writing.
+- Print a Master Evidence Summary Table: each included study (design, N, population,
+  arms, doses, comparator, follow-up, risk of bias) and every pooled outcome at every
+  timepoint (measure, estimate, 95% CI, p, I², tau², Q p, model, certainty).
+- Summarise prior reviews and state how this review differs in scope, sample, focus,
+  or timepoint granularity.
+- Mark any unpooled or unreported outcome as NOT_POOLED / NOT_REPORTED. Never guess.
+
+Phase 2 — External verification
+- Verify guidelines, landmark trials, and mechanistic sources; prefer primary trials
+  over reviews and use dual attribution for nested claims.
+- Record DOI/PMID and the exact location of every external number.
+
+Phase 3 — Drafting
+- Block order: principal findings; time-course efficacy and mechanism; target
+  attainment; comparison with prior reviews and landmark trials; safety and laboratory
+  profile; clinical implications and guideline alignment; strengths and limitations;
+  future research; conclusions.
+- Every outcome domain follows Restate, Compare, Interpret. Explain discrepancies by
+  population, intervention or comparator, methodology, or power and measurement.
+- Interpret I² with tau² and the prediction interval. Calibrate every certainty verb
+  to GRADE (high shows, moderate likely, low may, very low very uncertain).
+- Split limitations into study-level and review-level, each as State, Impact, Mitigate.
+- Make the future agenda specific: population, intervention and comparator, design,
+  outcome, duration.
+
+Phase 4 — Verification and export
+- Run `sr audit` and resolve every error. Run `sr fidelity` and resolve every
+  unmatched token or document its external source.
+- Validate references live, export Markdown and DOCX from the same source.
+</EXECUTION>
+
+<GUARDRAILS>
+- Zero-omission: discuss all outcomes, including null, inconclusive, and unfavourable ones.
+- No data dumps: no forest-plot rows or raw tables in the Discussion.
+- No em dashes, no banned AI vocabulary, no generic "more research is needed".
+- Do not criticise prior authors. No invented numbers, references, or certainty ratings.
+- Citation style: [INSERT_CITATION_STYLE]. Every number resolves to a source.
+</GUARDRAILS>
+```
+
+**Beginner tips**
+- Start with `sr inventory`; the output is the proof that no workspace folder was skipped.
+- `--type meta-analysis` behaves like `--type systematic-review` and focuses on Discussion + References when a project directory is supplied.
+- Failed audit? Read the `sr_discussion_audit.json` report. `outcome_omitted` means a required outcome is genuinely missing; `em_dash`, `banned_vocabulary`, and `generic_future_research` are mechanical fixes that must not alter numbers.
+- `sr fidelity` proves string presence, not statistical pairing. Confirm that each surviving number is attached to the right outcome and timepoint.
+
+---
 
 ## Master Prompt 3 — Deterministic Biostatistics & APA Reporting Engine
 
@@ -1377,6 +1490,11 @@ python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANN
 | Project-grounded thesis Discussion | `python main.py --topic "..." --type thesis --project-dir "path/to/project"` |
 | Only some sections | `python main.py --topic "..." --sections "Introduction,Discussion"` |
 | Systematic review | `python main.py --topic "..." --type systematic-review` |
+| SR/MA Discussion from a study workspace | `python main.py --topic "..." --type systematic-review --project-dir "path/to/study" --sr-require "MSSBP week 8" --humanize` |
+| Inventory a study workspace | `python -m meddraft_ai sr inventory "path/to/study" --json` |
+| Audit a review Discussion | `python -m meddraft_ai sr audit "discussion.md" --require "BP control rate" --min-words 1500` |
+| Numeric fidelity check | `python -m meddraft_ai sr fidelity --draft "discussion.md" --source "path/to/meta" --source "path/to/included"` |
+| Render a plug-and-play SR/MA prompt | `python -m meddraft_ai sr brief --spec "study_spec.json" --out "discussion_brief.md"` |
 | Scoping review / meta-analysis / narrative review | `python main.py --topic "..." --type scoping-review` (or `meta-analysis`, `narrative-review`) |
 | Protocol | `python main.py --topic "..." --type protocol` |
 | Grant proposal / clinical report | `python main.py --topic "..." --type grant-proposal` (or `clinical-report`) |
@@ -1419,6 +1537,7 @@ python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANN
 | figure plan, one claim per figure, legend sync | figure-planner / figure-style |
 | review article, survey paper structure, perspective article | review-article-architecture |
 | data availability, data-sharing statement, accession number | data-availability |
+| systematic review discussion, meta-analysis discussion, GRADE certainty, pooled effect | systematic-review-discussion |
 
 ---
 

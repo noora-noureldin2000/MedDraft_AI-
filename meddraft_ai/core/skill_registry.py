@@ -28,6 +28,7 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "pdf",                  # Phase 2: newly registered
     "docx",                 # Phase 2: newly registered
     "thesis-discussion-writer",
+    "systematic-review-discussion",  # SR/MA Discussion architect (zero-omission + GRADE)
     "secondary-citation-extractor",  # Nested/secondary citation tracing + dual attribution
     "medical-clinicaltrials",  # Filtered ClinicalTrials.gov search + NCT lookup
     "citation-integrity",  # Numbered-citation discipline for lit reviews & methods
@@ -72,6 +73,17 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "right-to-left",
         "bilingual",
         "mixed-direction",
+    ],
+    "systematic-review-discussion": [
+        "systematic review discussion",
+        "meta-analysis discussion",
+        "discussion architect",
+        "publication-grade discussion",
+        "discussion section of the systematic review",
+        "grade certainty",
+        "pooled effect",
+        "forest plot interpretation",
+        "zero-omission",
     ],
     "secondary-citation-extractor": [
         "as cited in",
@@ -251,10 +263,10 @@ class SkillRegistry:
     def match_skill_for_task(self, task_text: str) -> str | None:
         """Automatically route a task description to the most relevant skill.
 
-        Dedicated code-layer scorers run first (secondary-citation-extractor,
-        medical-clinicaltrials, mixed Arabic/Latin script detection), then the
-        Nature Paper Skills chain hook; remaining packs fall back to keyword
-        overlap.
+        Dedicated code-layer scorers run first (systematic-review Discussion,
+        secondary-citation-extractor, medical-clinicaltrials, mixed Arabic/Latin
+        script detection), then the Nature Paper Skills chain hook; remaining
+        packs fall back to keyword overlap.
 
         Returns the skill/pack name (e.g. ``"secondary-citation-extractor"``)
         or ``None`` when nothing matches confidently.
@@ -262,6 +274,12 @@ class SkillRegistry:
         if not task_text:
             return None
         # Dedicated scorers — lazy imports, no cycles.
+        try:
+            from meddraft_ai.core.sr_discussion import should_trigger as _sr_trigger
+            if _sr_trigger(task_text):
+                return "systematic-review-discussion"
+        except ImportError:
+            pass
         try:
             from meddraft_ai.extraction.secondary_citation import (
                 SecondaryCitationExtractor,

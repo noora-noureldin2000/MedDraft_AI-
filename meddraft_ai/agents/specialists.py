@@ -10,9 +10,10 @@ from meddraft_ai.core.llm_client import LLMClient
 logger = logging.getLogger(__name__)
 
 class BaseSpecialist:
-    def __init__(self, name: str, folder_keywords: list):
+    def __init__(self, name: str, folder_keywords: list, priority_keywords: list | None = None):
         self.name = name
         self.folder_keywords = folder_keywords
+        self.priority_keywords = priority_keywords or []
         self.config = get_config()
         self.registry = SkillRegistry().load()
         self.llm = LLMClient()
@@ -61,6 +62,28 @@ class BaseSpecialist:
             total_chars += len(entry)
             loaded_paths.add(abs_path)
             return True
+
+        # Phase 0: a specialist's own core pack must survive the 60k budget.
+        # Without this, walk order can let large supporting packs exhaust the
+        # budget before the primary skill is reached. Empty for every existing
+        # specialist, so their byte-for-byte context is unchanged.
+        for frag in self.priority_keywords:
+            for reg_skill in self.registry.skills:
+                norm = reg_skill["abs_path"].replace("\\", "/")
+                if frag not in norm or norm in loaded_paths:
+                    continue
+                content = self._read_prompt_file(reg_skill["abs_path"])
+                if not content:
+                    continue
+                entry_len = len(f"### SKILL: {reg_skill['name']}\n{content}\n")
+                if total_chars + entry_len > MAX_CONTEXT_CHARS:
+                    logger.warning(
+                        "Priority skill %s exceeds the context budget; loading it would evict supporting packs.",
+                        reg_skill["abs_path"],
+                    )
+                    continue
+                _append(reg_skill["abs_path"], reg_skill["name"], content)
+                break
 
         # Phase 1: preload only the Nature skills this query actually needs
         # (and only those assigned to this specialist). Empty for queries
@@ -208,6 +231,8 @@ class VerifierAndStatsSpecialist(BaseSpecialist):
             "submission-audit/SKILL.md",
             "citation-verifier/SKILL.md",
             "data-availability/SKILL.md",
+            # SR/MA Discussion gate: GRADE calibration, outcome coverage, prose bans.
+            "systematic-review-discussion/SKILL.md",
         ])
 
 
@@ -284,6 +309,49 @@ class RebuttalSpecialist(BaseSpecialist):
 class MedPaperAssistantSpecialist(BaseSpecialist):
     def __init__(self):
         super().__init__("MED_PAPER_ASSISTANT", ["med_paper_assistant", "medical_research_skills"])
+
+
+class SystematicReviewDiscussionSpecialist(BaseSpecialist):
+    """Publication-grade Discussion writer for systematic reviews and
+    meta-analyses.
+
+    Carries the SR/MA Discussion architect pack plus the supporting integrity,
+    statistics, and prose skills it delegates to. Loaded by ``main.py`` whenever
+    ``--type`` is ``systematic-review`` or ``meta-analysis``, and available for
+    direct use by tooling and tests.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "SYSTEMATIC_REVIEW_DISCUSSION",
+            [
+                "systematic-review-discussion/SKILL.md",
+                "claim-source-verification/SKILL.md",
+                "stats-reporting-audit/SKILL.md",
+                "scientific-prose-style/SKILL.md",
+            ],
+            # The core pack is the contract; load it before any supporting pack
+            # so walk order and the 60k budget cannot evict it.
+            priority_keywords=["systematic-review-discussion/SKILL.md"],
+        )
+
+    def draft(self, study_brief: str) -> str:
+        """Draft a Discussion from an already-assembled study brief.
+
+        The brief must contain the inventory, the Master Evidence Summary, the
+        PICO, and the target output. No numerical result is supplied by this
+        method: everything comes from the caller's verified evidence.
+        """
+        return self.execute(
+            "Apply the systematic-review-discussion skill workflow. First confirm the "
+            "workspace inventory and the Master Evidence Summary Table, then write the "
+            "Discussion in the required block order. Discuss every pooled outcome, "
+            "including null and safety findings. Calibrate every certainty verb to its "
+            "GRADE rating, split limitations into study-level and review-level with "
+            "State-Impact-Mitigate, and make the future-research agenda specific. "
+            "No em dashes, no banned AI vocabulary, no invented or rounded numbers.\n\n"
+            f"{study_brief}"
+        )
 
 
 class SecondaryCitationSpecialist(BaseSpecialist):

@@ -94,6 +94,10 @@ python main.py --topic "CAR-T cell therapy in refractory lymphoma" --search-dept
 # Source-grounded thesis Discussion generation from project files
 python main.py --topic "Hibiscus extract on periodontal healing" --type thesis --project-dir ./projects/BioGap_G2_Hibiscus
 
+# Source-grounded SR/MA Discussion + deterministic skill gate
+python main.py --topic "Triple therapy in uncontrolled hypertension" --type systematic-review \
+  --project-dir ./projects/triple-therapy --sr-require "MSSBP week 8" --sr-require "serious adverse events" --humanize
+
 # Zero-hallucination structured extraction of a single study PDF
 # → auditable JSON (every field: value + verbatim quote + page + verification status)
 # → highlighted proof PDF with all verified quotes marked
@@ -133,6 +137,26 @@ python -m meddraft_ai refs trials-get NCT04368728
 python -m meddraft_ai refs plan-angles "SGLT2 inhibitors renal outcomes"
 ```
 
+### Systematic-Review Discussion CLI (`sr`)
+
+The `systematic-review-discussion` skill exposes its deterministic gates as a standalone CLI:
+
+```bash
+# List and classify every file in the protocol / included / meta / prior-review folders
+python -m meddraft_ai sr inventory "./projects/triple-therapy" --json
+
+# Gate a drafted Discussion (exit 1 on error-severity findings)
+python -m meddraft_ai sr audit "./projects/triple-therapy/Discussion_Draft.md" \
+  --require "MSSBP week 8" --require "BP control rate" --require "serious adverse events"
+
+# Confirm every quantitative token exists in the evidence files
+python -m meddraft_ai sr fidelity --draft "./projects/triple-therapy/Discussion_Draft.md" \
+  --source "./projects/triple-therapy/meta" --source "./projects/triple-therapy/included studies"
+
+# Render the plug-and-play system command from a JSON study spec
+python -m meddraft_ai sr brief --spec "./projects/triple-therapy/study_spec.json" --out "./projects/triple-therapy/discussion_brief.md"
+```
+
 Low-level DOM navigation (mapped `data-agent-id`) is available through the compiled browser engine directly:
 
 ```bash
@@ -154,6 +178,7 @@ Three skill layers are wired into the pipeline:
 | `test-guard` | Reactive review of generated/changed test code |
 | `docs-guard` | Reactive review of generated/changed documentation |
 | `thesis-master-guide` | Cairo University Faculty of Dentistry Master Thesis formatting and content guide (27-component order, margins, spacing, reference style) |
+| `systematic-review-discussion` | SR/MA Discussion architect: zero-omission outcome coverage, RCI interpretation, GRADE-calibrated certainty, two-tier limitations, and a deterministic audit + numeric-fidelity CLI (mirrored in `meddraft_ai/prompts/`) |
 | `secondary-citation-extractor` | Nested/secondary citation tracing: distinguishes container vs root authors, maps in-text keys to the bibliography, verifies via Crossref/PubMed/Scholar, emits dual `as cited in` attribution |
 | `medical-clinicaltrials` | Filtered ClinicalTrials.gov search (condition/intervention/phase/status) + full NCT-ID records for evidence tables and recruitment tracking (no API key) |
 | `citation-integrity` | Numbered sequential citations, academic-sources-only rule, and QA checklist for literature reviews and methodology sections |
@@ -178,11 +203,11 @@ Three skill layers are wired into the pipeline:
 | `citation-verifier` | Offline `.bib` hygiene complementing live-API validation |
 | `nature-portfolio-playbook` | Venue fit + policy preflight (Nature / Methods / Biotech) |
 
-**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out skills automatically whenever the task text carries their signals (`as cited in` → `secondary-citation-extractor`; trial/phase/NCT language → `medical-clinicaltrials`; mixed Arabic + Latin script, or Arabic/RTL + document wording → `arabic-mixed-rtl`; literature-review/numbered-citation language → `citation-integrity`; reduce-word-count/word-limit/shorten-manuscript language → `surgical-word-reduction`; background/timeline/research-log language → `academic-search-agent`; PDF parsing/extraction/form language → `pdf`). Script detection lives in `meddraft_ai/core/language_routing.py`. The pipeline likewise auto-runs them: `main.py` Phase 1 adds a bounded ClinicalTrials.gov lookup for clinical topics and Phase 2b traces secondary citations from any `--pdf-input`; `ExtractionEngine` attaches `secondary_citations` whenever markers are detected. `TrialsSpecialist` / `SecondaryCitationSpecialist` (`meddraft_ai/agents/specialists.py`) carry the skill contexts for LLM-grounded work, while `citation-integrity` and `surgical-word-reduction` feed `CoreWriter`/`ProofReader` and `academic-search-agent` feeds `DeepResearchSpecialist`.
+**Automatic routing:** `SkillRegistry.match_skill_for_task()` calls out skills automatically whenever the task text carries their signals (`as cited in` → `secondary-citation-extractor`; trial/phase/NCT language → `medical-clinicaltrials`; mixed Arabic + Latin script, or Arabic/RTL + document wording → `arabic-mixed-rtl`; systematic-review/meta-analysis + Discussion language → `systematic-review-discussion`; literature-review/numbered-citation language → `citation-integrity`; reduce-word-count/word-limit/shorten-manuscript language → `surgical-word-reduction`; background/timeline/research-log language → `academic-search-agent`; PDF parsing/extraction/form language → `pdf`). Script detection lives in `meddraft_ai/core/language_routing.py`. The pipeline likewise auto-runs them: `main.py` Phase 1 adds a bounded ClinicalTrials.gov lookup for clinical topics, Phase 2b traces secondary citations from any `--pdf-input`, and Phase 4b audits a systematic-review/meta-analysis Discussion against the skill gates. `TrialsSpecialist` / `SecondaryCitationSpecialist` / `SystematicReviewDiscussionSpecialist` (`meddraft_ai/agents/specialists.py`) carry the skill contexts for LLM-grounded work, while `citation-integrity` and `surgical-word-reduction` feed `CoreWriter`/`ProofReader` and `academic-search-agent` feeds `DeepResearchSpecialist`.
 
 **Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
 
-`academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
+`academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `systematic-review-discussion` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
 
 Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `arabic-mixed-rtl.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically. `arabic-mixed-rtl.md` is a standalone skill selected by script detection rather than topic keywords: any request mixing Arabic and Latin letters, or naming Arabic/RTL formatting for a document, routes to it (see `meddraft_ai/core/language_routing.py` and `tests/test_skill_registry.py`).
 
