@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Generic, List, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
@@ -39,6 +39,14 @@ class GroundedField(BaseModel, Generic[T]):
     verification_note: Optional[str] = Field(
         default=None,
         description="Audit diagnostics note populated by GroundingVerifier."
+    )
+    grounding_source: Optional[str] = Field(
+        default=None,
+        description="Engine that matched the quote (docling | tesseract | pymupdf | pdfplumber | table_*). Set by verifier."
+    )
+    match_score: Optional[float] = Field(
+        default=None,
+        description="Best fuzzy match score achieved during verification. Set by verifier."
     )
 
 
@@ -115,6 +123,28 @@ class CrossSectionAudit(BaseModel):
     )
 
 
+class FigurePoint(BaseModel):
+    """Single extracted data point or estimate from a figure or plot."""
+    label: str = Field(description="Subgroup, study name, or timepoint label.")
+    estimate: Optional[str] = Field(default=None, description="Numeric point estimate or coordinate.")
+    confidence_interval: Optional[str] = Field(default=None, description="e.g. '0.45 to 0.89'.")
+    derived_from_figure: bool = Field(default=True, description="Provenance marker.")
+
+
+class FigurePassSchema(BaseModel):
+    """Extracted data from a clinical trial figure (forest plot, KM curve, CONSORT)."""
+    figure_id: str
+    figure_type: Optional[str] = Field(default=None, description="e.g. forest_plot, kaplan_meier, consort, bar_chart")
+    axis_labels: Optional[Dict[str, str]] = Field(default=None, description="X and Y axis labels.")
+    extracted_points: List[FigurePoint] = Field(default_factory=list)
+    pooled_estimate: Optional[str] = Field(default=None, description="Overall pooled effect or summary line if present.")
+    confidence_interval: Optional[str] = Field(default=None, description="Pooled 95% CI.")
+    ocr_agreement: Literal["FULL", "PARTIAL", "CONFLICT", "NONE"] = Field(
+        default="NONE",
+        description="Agreement level between vision extraction and consensus figure OCR."
+    )
+
+
 class StudyExtractionSchema(BaseModel):
     """Master auditable output schema for a clinical study."""
     study_id: str
@@ -124,3 +154,5 @@ class StudyExtractionSchema(BaseModel):
     results: ResultsPassSchema
     discussion: DiscussionPassSchema
     semantic_audit: CrossSectionAudit
+    figures: List[FigurePassSchema] = Field(default_factory=list)
+    extraction_warnings: List[str] = Field(default_factory=list)

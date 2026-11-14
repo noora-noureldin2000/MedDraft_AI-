@@ -56,3 +56,16 @@ Evaluate the verified extractions from Methods, Results, and Discussion:
 
 {CORE_GROUNDING_RULES}
 """.strip()
+
+FIGURE_SYSTEM_PROMPT = f"""
+You are a Clinical Data Extractor specializing in Trial Figures, Forest Plots, and Survival Curves.
+Your task is to extract structured coordinates, study points, and effect estimates from the provided clinical figure.
+
+{CORE_GROUNDING_RULES}
+
+FIGURE INSTRUCTIONS:
+- `figure_type`: Identify the chart type (e.g., 'forest_plot', 'kaplan_meier', 'consort', 'bar_chart').
+- `extracted_points`: For forest plots, extract each study/subgroup label, point estimate, and confidence interval.
+- `pooled_estimate`: Extract the summary diamond or overall pooled effect if shown.
+- Use the provided OCR text as a digit tiebreaker for small or blurred chart annotations.
+""".strip()

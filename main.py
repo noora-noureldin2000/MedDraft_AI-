@@ -178,6 +178,12 @@ def verify_and_report_references(draft: str, report_path: Path) -> tuple[int, li
 @click.option("--parse-pdf", default=None, help="Extract structured zero-hallucination study JSON from PDF.")
 @click.option("--out", default=None, help="Output JSON path for --parse-pdf extraction.")
 @click.option("--annotated-pdf", default=None, help="Output highlighted PDF path for --parse-pdf.")
+@click.option("--no-ocr", is_flag=True, default=False, help="Disable OCR recovery for scanned pages.")
+@click.option("--ocr-lang", default=None, help="OCR language (e.g. eng).")
+@click.option("--no-figures", is_flag=True, default=False, help="Disable figure extraction pass.")
+@click.option("--reuse-extraction", is_flag=True, default=False, help="Reuse existing extraction if JSON exists.")
+@click.option("--coverage", "coverage_path", default=None, help="Output path for coverage.json.")
+@click.option("--strict-coverage", is_flag=True, default=False, help="Fail if any section or content page is missing.")
 @click.option("--project-dir", default=None, help="Directory containing protocol, results, and discussion notes.")
 @click.option("--sr-require", multiple=True, help="Outcome label that the SR/MA Discussion audit must find (repeatable).")
 @click.option("--provider", default=None, type=click.Choice(["dual", "simple"]), help="LLM provider mode.")
@@ -196,6 +202,12 @@ def main(
     parse_pdf: str,
     out: str,
     annotated_pdf: str,
+    no_ocr: bool,
+    ocr_lang: str,
+    no_figures: bool,
+    reuse_extraction: bool,
+    coverage_path: str,
+    strict_coverage: bool,
     project_dir: str,
     sr_require: tuple,
     provider: str,
@@ -220,11 +232,24 @@ def main(
             console.print(f"[red]Error: PDF not found: {target_pdf}[/red]")
             return
 
+        json_out = Path(out) if out else (out_path / f"{target_pdf.stem}_extraction.json")
+        if reuse_extraction and json_out.exists():
+            console.print(f"[green]Reusing existing extraction: {json_out}[/green]")
+            return
+
         console.print(Panel.fit(
             f"[bold cyan]MedDraft_AI — Zero-Hallucination Study Extractor[/bold cyan]\n"
             f"Target PDF: [yellow]{target_pdf.name}[/yellow]",
             border_style="cyan"
         ))
+
+        if no_ocr:
+            config.OCR_ENABLED = False
+        if ocr_lang:
+            config.OCR_LANG = ocr_lang
+        if no_figures:
+            config.FIGURE_EXTRACTION_ENABLED = False
+            config.FIGURE_OCR_ENABLED = False
 
         from meddraft_ai.extraction import (
             ExtractionEngine,
@@ -239,6 +264,7 @@ def main(
         engine = ExtractionEngine(target_pdf, output_dir=out_path)
         extraction_result = engine.process_pdf_full()
         bundle = extraction_result["bundle"]
+        evidence = bundle.evidence
 
         chunker = SemanticDocumentChunker()
         chunks = chunker.chunk_bundle(bundle)
@@ -253,6 +279,7 @@ def main(
             page_texts=bundle.page_texts,
             tables_json=chunks.get("tables", []),
             pdf_annotator=annotator,
+            evidence=evidence,
         )
         extractor = StudyExtractor(
             llm_structured_callable=llm.query_structured,
@@ -270,9 +297,41 @@ def main(
             metadata_pmid=study_pmid,
         )
 
-        json_out = Path(out) if out else (out_path / f"{target_pdf.stem}_extraction.json")
         json_out.write_text(study_data.model_dump_json(indent=2), encoding="utf-8")
         console.print(f"[bold green]✨ Auditable study extraction saved to: {json_out}[/bold green]")
+
+        # Coverage manifest
+        from meddraft_ai.extraction.coverage import CoverageAuditor
+        cov_manifest = CoverageAuditor.audit(
+            evidence_index=evidence,
+            semantic_chunks=chunks,
+            study_schema=study_data,
+            pass_budgets=extractor.pass_budgets,
+            header_fallbacks=chunker.header_fallbacks,
+        )
+        cov_out = Path(coverage_path) if coverage_path else (out_path / f"{target_pdf.stem}_coverage.json")
+        cov_manifest.save(cov_out)
+        console.print(f"[bold green]✨ Coverage manifest saved to: {cov_out}[/bold green]")
+
+        # One-screen coverage summary table
+        from rich.table import Table
+        summary_tbl = Table(title=f"Extraction Coverage Summary: {target_pdf.name}", show_header=True)
+        summary_tbl.add_column("Metric", style="cyan")
+        summary_tbl.add_column("Count / Status", style="green")
+
+        summary_tbl.add_row("Total Pages", str(cov_manifest.pages_total))
+        summary_tbl.add_row("Pages with Text", str(cov_manifest.pages_with_text))
+        summary_tbl.add_row("Pages OCR'd", str(len(cov_manifest.pages_ocr)))
+        summary_tbl.add_row("Tables Found", str(cov_manifest.tables.get("found", 0)))
+        summary_tbl.add_row("Figures Exported", str(cov_manifest.figures.get("exported", 0)))
+        summary_tbl.add_row("Reported Fields", str(cov_manifest.verification.get("reported", 0)))
+        summary_tbl.add_row("Downgraded Fields", str(cov_manifest.verification.get("downgraded", 0)))
+        summary_tbl.add_row("Extraction Warnings", str(len(study_data.extraction_warnings)))
+        console.print(summary_tbl)
+
+        if strict_coverage and cov_manifest.warnings:
+            console.print(f"[bold red]Strict coverage failure: {cov_manifest.warnings}[/bold red]")
+            sys.exit(1)
 
         # Write all accumulated verified sentence highlights in a single batch pass
         if annotator and verifier.verified_quotes:

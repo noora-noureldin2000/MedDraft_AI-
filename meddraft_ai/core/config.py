@@ -37,6 +37,29 @@ class Config:
     # Token & Context Limits
     MAX_CONTEXT_TOKENS: int = 100000
     LLM_TEMPERATURE: float = 0.2
+
+    # --- OCR & Page Mapping Configuration ---
+    OCR_ENABLED: bool = field(default_factory=lambda: os.getenv("OCR_ENABLED", "true").lower() == "true")
+    OCR_ENGINE: str = field(default_factory=lambda: os.getenv("OCR_ENGINE", "tesseract"))
+    TESSERACT_CMD: str = field(default_factory=lambda: os.getenv("TESSERACT_CMD", "tesseract"))
+    OCR_LANG: str = field(default_factory=lambda: os.getenv("OCR_LANG", "eng"))
+    OCR_DPI: int = field(default_factory=lambda: int(os.getenv("OCR_DPI", "300")))
+    OCR_MIN_CHARS: int = field(default_factory=lambda: int(os.getenv("OCR_MIN_CHARS", "30")))
+    OCR_FORCE_PAGE: bool = field(default_factory=lambda: os.getenv("OCR_FORCE_PAGE", "false").lower() == "true")
+
+    # --- Figure Extraction Configuration ---
+    FIGURE_OCR_ENABLED: bool = field(default_factory=lambda: os.getenv("FIGURE_OCR_ENABLED", "true").lower() == "true")
+    FIGURE_EXTRACTION_ENABLED: bool = field(default_factory=lambda: os.getenv("FIGURE_EXTRACTION_ENABLED", "true").lower() == "true")
+
+    # --- Extraction Pass Budget ---
+    PASS_INPUT_TOKEN_BUDGET: int = field(default_factory=lambda: int(os.getenv("PASS_INPUT_TOKEN_BUDGET", "45000")))
+    PASS_OVERLAP_UNITS: int = field(default_factory=lambda: int(os.getenv("PASS_OVERLAP_UNITS", "2")))
+
+    # --- Grounding Verification Thresholds ---
+    GROUNDING_FUZZY_THRESHOLD: float = field(default_factory=lambda: float(os.getenv("GROUNDING_FUZZY_THRESHOLD", "95.0")))
+    GROUNDING_FUZZY_THRESHOLD_OCR: float = field(default_factory=lambda: float(os.getenv("GROUNDING_FUZZY_THRESHOLD_OCR", "92.0")))
+    TABLE_VERIFICATION: bool = field(default_factory=lambda: os.getenv("TABLE_VERIFICATION", "true").lower() == "true")
+    STRICT_PAGE_GROUNDING: bool = field(default_factory=lambda: os.getenv("STRICT_PAGE_GROUNDING", "true").lower() == "true")
     
     # Academic Database Integrations
     NCBI_API_KEY: str = field(default_factory=lambda: os.getenv("NCBI_API_KEY", ""))

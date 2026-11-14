@@ -35,6 +35,11 @@ class ProcessedDocumentBundle:
     docling_doc: Optional[Any] = None
     page_texts: Dict[int, str] = field(default_factory=dict)
     tables_data: List[Dict[str, Any]] = field(default_factory=list)
+    # Phase 0 additions — defaulted so nothing breaks.
+    pagemap_path: Optional[str] = None
+    figure_ocr_path: Optional[str] = None
+    evidence: Optional[Any] = None       # EvidenceIndex when available
+    coverage: Dict[str, Any] = field(default_factory=dict)
 
 
 class DocumentConverterEngine:
@@ -56,6 +61,7 @@ class DocumentConverterEngine:
         self.docling_doc: Optional[Any] = None
         self.page_texts: Dict[int, str] = {}
         self.tables_data: List[Dict[str, Any]] = []
+        self.figure_evidences: List[Any] = []
 
     def _setup_dirs(self, output_dir: Optional[Union[str, Path]]) -> None:
         from meddraft_ai.core.config import get_config
@@ -67,27 +73,145 @@ class DocumentConverterEngine:
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
     def extract_page_texts(self) -> Dict[int, str]:
-        """Extract 1-indexed dictionary of page texts using pdfplumber with pypdf fallback."""
+        """Extract 1-indexed dictionary of page texts using PageMapper first,
+        falling back to PyMuPDF, pdfplumber, and pypdf.
+        Ensures every physical page has a key.
+        """
+        # 1. Try PageMapper if enabled
+        from meddraft_ai.core.config import get_config
+        config = get_config()
+        if config.OCR_ENABLED:
+            try:
+                from meddraft_ai.ingestion.page_mapper import PageMapper
+                mapper = PageMapper(
+                    pdf_path=self.pdf_path,
+                    output_dir=self.markdown_dir,
+                    ocr_min_chars=config.OCR_MIN_CHARS,
+                    ocr_dpi=config.OCR_DPI,
+                    ocr_lang=config.OCR_LANG,
+                    tesseract_cmd=config.TESSERACT_CMD,
+                    ocr_enabled=config.OCR_ENABLED,
+                )
+                map_res = mapper.build()
+                if map_res.pages:
+                    self.page_map_result = map_res
+                    pages = {p: ev.text for p, ev in map_res.pages.items()}
+                    self.total_pages = len(pages)
+                    return pages
+            except Exception as exc:
+                logger.debug("PageMapper extraction failed or skipped: %s", exc)
+
         pages: Dict[int, str] = {}
+        # 2. PyMuPDF (fitz)
+        try:
+            import fitz
+            doc = fitz.open(str(self.pdf_path))
+            for idx in range(len(doc)):
+                pages[idx + 1] = doc[idx].get_text("text") or ""
+            doc.close()
+            self.total_pages = len(pages)
+            return pages
+        except Exception as exc:
+            logger.debug("fitz extraction failed: %s", exc)
+
+        # 3. pdfplumber
         try:
             import pdfplumber
             with pdfplumber.open(self.pdf_path) as pdf:
                 for idx, page in enumerate(pdf.pages, start=1):
                     pages[idx] = page.extract_text() or ""
+            self.total_pages = len(pages)
             return pages
         except Exception as exc:
             logger.debug("pdfplumber page text extraction failed: %s", exc)
 
+        # 4. pypdf
         try:
             import pypdf
             reader = pypdf.PdfReader(self.pdf_path)
             for idx, page in enumerate(reader.pages, start=1):
                 pages[idx] = page.extract_text() or ""
+            self.total_pages = len(reader.pages)
             return pages
         except Exception as exc:
             logger.warning("pypdf page text extraction failed: %s", exc)
 
+        if self.total_pages > 0:
+            for p in range(1, self.total_pages + 1):
+                pages.setdefault(p, "")
+
         return pages
+
+    def _align_page_indices(self, docling_doc: Any, page_texts: Dict[int, str]) -> int:
+        """Compare Docling prov page numbers against physical page texts.
+        Returns the offset if consistently page±1.
+        """
+        if not docling_doc or not page_texts:
+            return 0
+        offsets = []
+        try:
+            for item, _level in docling_doc.iterate_items():
+                if getattr(item, "label", "") in ("section_header", "text") and len(getattr(item, "text", "")) > 20:
+                    doc_p = item.prov[0].page_no if getattr(item, "prov", None) else None
+                    if doc_p is None:
+                        continue
+                    snippet = item.text[:40].strip().lower()
+                    for offset in (0, -1, 1):
+                        cand_p = doc_p + offset
+                        if cand_p in page_texts and snippet in page_texts[cand_p].lower():
+                            offsets.append(offset)
+                            break
+                    if len(offsets) >= 10:
+                        break
+        except Exception:
+            pass
+
+        if offsets and len(offsets) >= 3:
+            common = max(set(offsets), key=offsets.count)
+            if offsets.count(common) >= len(offsets) * 0.8 and common != 0:
+                logger.warning("Docling page alignment drift detected! Applying offset: %d", common)
+                return common
+        return 0
+
+    def _build_evidence_index(self) -> Any:
+        from meddraft_ai.extraction.evidence import (
+            EvidenceIndex,
+            PageEvidence,
+            TableEvidence,
+            FigureEvidence,
+        )
+        page_evidences: Dict[int, PageEvidence] = {}
+        if hasattr(self, "page_map_result") and self.page_map_result and self.page_map_result.pages:
+            page_evidences = self.page_map_result.pages
+        else:
+            for p, txt in self.page_texts.items():
+                page_evidences[p] = PageEvidence(
+                    page=p,
+                    text=txt,
+                    engine="fitz",
+                    char_count=len(txt),
+                )
+
+        table_evidences: List[TableEvidence] = []
+        for t in self.tables_data:
+            table_evidences.append(TableEvidence(
+                table_id=t.get("table_id", ""),
+                page=t.get("page"),
+                caption=t.get("caption", ""),
+                markdown=t.get("markdown", ""),
+                records=t.get("records", []),
+                source=t.get("source", "docling"),
+            ))
+
+        fig_evidences: List[FigureEvidence] = getattr(self, "figure_evidences", [])
+
+        idx = EvidenceIndex(
+            pages=page_evidences,
+            tables=table_evidences,
+            figures=fig_evidences,
+            docling_markdown=self.markdown_text,
+        )
+        return idx
 
     def convert_full(self) -> ProcessedDocumentBundle:
         """Runs complete conversion producing docling document, page texts, and table data."""
@@ -96,11 +220,18 @@ class DocumentConverterEngine:
 
         if not is_docling_available():
             self.markdown_text = self._fallback_extract_text()
+            if not self.tables_data:
+                self.tables_data = self._extract_tables_pdfplumber()
+            evidence = self._build_evidence_index()
+            pagemap_p = self.markdown_dir / f"{self.doc_name}_pagemap.json"
             return ProcessedDocumentBundle(
                 markdown=self.markdown_text,
                 docling_doc=None,
                 page_texts=self.page_texts,
                 tables_data=self.tables_data,
+                pagemap_path=str(pagemap_p) if pagemap_p.exists() else None,
+                evidence=evidence,
+                coverage=evidence.coverage(),
             )
 
         return self._convert_with_docling_full()
@@ -121,6 +252,18 @@ class DocumentConverterEngine:
 
             pipeline_opts = PdfPipelineOptions(do_ocr=True, do_table_structure=True)
             pipeline_opts.table_structure_options.do_cell_matching = True
+
+            from meddraft_ai.core.config import get_config
+            cfg = get_config()
+            try:
+                from docling.datamodel.pipeline_options import TesseractCliOcrOptions
+                pipeline_opts.ocr_options = TesseractCliOcrOptions(
+                    tesseract_cmd=cfg.TESSERACT_CMD,
+                    lang=[cfg.OCR_LANG],
+                )
+            except Exception as ocr_exc:
+                logger.debug("Could not pin TesseractCliOcrOptions: %s", ocr_exc)
+
             converter = DoclingDocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)}
             )
@@ -139,30 +282,49 @@ class DocumentConverterEngine:
             self._rewrite_image_refs()
             self._extract_tables_from_docling(self.docling_doc)
 
+            # Fallback to pdfplumber tables if docling found zero tables
+            if not self.tables_data:
+                self.tables_data = self._extract_tables_pdfplumber()
+
             md_path = self.markdown_dir / f"{self.doc_name}.md"
             md_path.write_text(self.markdown_text, encoding="utf-8")
             console.print(f"[green]  Markdown saved: {md_path}[/green]")
 
+            evidence = self._build_evidence_index()
+            pagemap_p = self.markdown_dir / f"{self.doc_name}_pagemap.json"
+            fig_ocr_p = self.images_dir / f"{self.doc_name}_figure_ocr.json"
             return ProcessedDocumentBundle(
                 markdown=self.markdown_text,
                 docling_doc=self.docling_doc,
                 page_texts=self.page_texts,
                 tables_data=self.tables_data,
+                pagemap_path=str(pagemap_p) if pagemap_p.exists() else None,
+                figure_ocr_path=str(fig_ocr_p) if fig_ocr_p.exists() else None,
+                evidence=evidence,
+                coverage=evidence.coverage(),
             )
 
         except Exception as exc:
             console.print(f"[red]Docling conversion failed: {exc}. Falling back to text extraction.[/red]")
             self.markdown_text = self._fallback_extract_text()
+            if not self.tables_data:
+                self.tables_data = self._extract_tables_pdfplumber()
+            evidence = self._build_evidence_index()
+            pagemap_p = self.markdown_dir / f"{self.doc_name}_pagemap.json"
             return ProcessedDocumentBundle(
                 markdown=self.markdown_text,
                 docling_doc=None,
                 page_texts=self.page_texts,
                 tables_data=self.tables_data,
+                pagemap_path=str(pagemap_p) if pagemap_p.exists() else None,
+                evidence=evidence,
+                coverage=evidence.coverage(),
             )
 
     def _extract_tables_from_docling(self, doc: Any) -> None:
         """Extract structured tables with coordinates, markdown grid, and records."""
         table_count = 0
+        self.tables_data = []
         for element, _level in doc.iterate_items():
             if getattr(element, "label", "") == "table":
                 table_count += 1
@@ -174,16 +336,63 @@ class DocumentConverterEngine:
                 except Exception as exc:
                     logger.debug("Failed dataframe export on table %d: %s", table_count, exc)
 
+                caption = getattr(element, "caption_text", None) or f"Table {table_count}"
+                caption_source = "docling_caption" if getattr(element, "caption_text", None) else "synthesized"
+
                 self.tables_data.append({
                     "table_id": f"Table_p{page_no}_{table_count}",
                     "page": page_no,
-                    "caption": getattr(element, "caption_text", f"Table {table_count}"),
+                    "caption": caption,
+                    "caption_source": caption_source,
                     "markdown": element.export_to_markdown() if hasattr(element, "export_to_markdown") else "",
                     "records": records,
+                    "source": "docling",
                 })
 
+    def _extract_tables_pdfplumber(self) -> List[Dict[str, Any]]:
+        """Fallback table extraction using pdfplumber when Docling is unavailable or returns 0 tables."""
+        tables: List[Dict[str, Any]] = []
+        try:
+            import pdfplumber
+            with pdfplumber.open(self.pdf_path) as pdf:
+                table_count = 0
+                for page_idx, page in enumerate(pdf.pages, start=1):
+                    raw_tables = page.extract_tables() or []
+                    for raw_t in raw_tables:
+                        if not raw_t or len(raw_t) < 2:
+                            continue
+                        table_count += 1
+                        headers = [str(c).strip() if c is not None else f"col_{j}" for j, c in enumerate(raw_t[0])]
+                        records = []
+                        for row in raw_t[1:]:
+                            rec = {}
+                            for j, h in enumerate(headers):
+                                rec[h] = str(row[j]).strip() if j < len(row) and row[j] is not None else ""
+                            records.append(rec)
+
+                        # Generate Markdown grid
+                        md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+                        for r in records:
+                            md_lines.append("| " + " | ".join(str(r.get(h, "")) for h in headers) + " |")
+                        md_table = "\n".join(md_lines)
+
+                        tables.append({
+                            "table_id": f"Table_p{page_idx}_{table_count}",
+                            "page": page_idx,
+                            "caption": f"Table {table_count}",
+                            "caption_source": "pdfplumber_fallback",
+                            "markdown": md_table,
+                            "records": records,
+                            "source": "pdfplumber",
+                        })
+        except Exception as exc:
+            logger.debug("pdfplumber table extraction failed: %s", exc)
+        return tables
+
     def _extract_images(self, doc: Any) -> None:
+        from meddraft_ai.extraction.evidence import FigureEvidence
         image_counter = 0
+        self.figure_evidences = []
         for element, _level in doc.iterate_items():
             image_ref = getattr(element, "image", None)
             if image_ref is None or not getattr(image_ref, "uri", None):
@@ -197,8 +406,33 @@ class DocumentConverterEngine:
                 filepath = self.images_dir / filename
                 pil_image.save(str(filepath))
                 self.image_refs[image_ref.uri] = filename
-            except Exception:
-                pass
+
+                page_no = element.prov[0].page_no if getattr(element, "prov", None) else None
+                caption = getattr(element, "caption_text", None) or f"Figure {image_counter}"
+
+                self.figure_evidences.append(FigureEvidence(
+                    figure_id=f"Figure_p{page_no or 1}_{image_counter}",
+                    page=page_no,
+                    image_path=str(filepath),
+                    caption=caption,
+                ))
+            except Exception as exc:
+                logger.debug("Image extraction failed: %s", exc)
+
+        # Run Figure OCR if enabled
+        from meddraft_ai.core.config import get_config
+        cfg = get_config()
+        if cfg.FIGURE_OCR_ENABLED and self.figure_evidences:
+            try:
+                from meddraft_ai.ingestion.figure_ocr import FigureOCR
+                f_ocr = FigureOCR(
+                    tesseract_cmd=cfg.TESSERACT_CMD,
+                    lang=cfg.OCR_LANG,
+                    output_dir=self.images_dir,
+                )
+                self.figure_evidences = f_ocr.process_all(self.figure_evidences, doc_name=self.doc_name)
+            except Exception as ocr_exc:
+                logger.debug("Figure OCR processing failed: %s", ocr_exc)
 
     def _rewrite_image_refs(self) -> None:
         for original_uri, local_name in self.image_refs.items():

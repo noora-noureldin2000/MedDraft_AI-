@@ -63,12 +63,26 @@ class LLMClient:
         user_prompt: str,
         response_model: Type[T],
         temperature: float = 0.0,
+        image_paths: Optional[list[str]] = None,
     ) -> T:
-        """Queries LLM and returns validated Pydantic model with automatic fallback."""
-        route_info = self.router.route(user_prompt)
+        """Queries LLM and returns validated Pydantic model with automatic fallback and vision support."""
+        primary_image = image_paths[0] if image_paths else None
+        route_info = self.router.route(user_prompt, primary_image)
         base_url = route_info.get("base_url") or self.config.SIMPLE_BASE_URL
         api_key = route_info.get("api_key") or self.config.SIMPLE_API_KEY or os.getenv("OPENAI_API_KEY", "")
         model = route_info.get("model") or self.config.SIMPLE_MODEL
+
+        # If routed to vision provider (e.g. Ollama vision), use query() with schema prompt
+        if route_info.get("is_vision") and route_info.get("provider") == "ollama":
+            schema_json = json.dumps(response_model.model_json_schema(), indent=2)
+            augmented = (
+                f"{user_prompt}\n\n"
+                f"You MUST return ONLY valid JSON matching this schema exactly:\n"
+                f"```json\n{schema_json}\n```"
+            )
+            raw = self._query_ollama_vision(system_prompt, augmented, primary_image, route_info)
+            cleaned = self._clean_json_markdown(raw)
+            return response_model.model_validate_json(cleaned)
 
         if not api_key:
             raise ValueError("No API key configured. Set SIMPLE_API_KEY (or OPENAI_API_KEY) in your .env file.")
@@ -76,11 +90,23 @@ class LLMClient:
         try:
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url=base_url if base_url else None)
+
+            # Construct user message (text or multimodal)
+            user_msg_content: Any = user_prompt
+            if primary_image and os.path.exists(primary_image):
+                import base64
+                with open(primary_image, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode("utf-8")
+                user_msg_content = [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_img}"}},
+                ]
+
             completion = client.beta.chat.completions.parse(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": user_msg_content},
                 ],
                 response_format=response_model,
                 temperature=temperature,

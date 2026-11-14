@@ -70,5 +70,9 @@ class ExtractionEngine:
             "bundle": bundle,
             "metadata": citation_meta,
             "verified_citations": [c.to_dict() for c in verified_citations],
+            "pagemap_path": bundle.pagemap_path,
+            "figure_ocr_path": bundle.figure_ocr_path,
+            "evidence": bundle.evidence,
+            "coverage": bundle.coverage,
         }
 

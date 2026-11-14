@@ -13,6 +13,12 @@ from .secondary_citation import (
     ContainerSource,
     RootSource,
 )
+from .evidence import (
+    PageEvidence,
+    TableEvidence,
+    FigureEvidence,
+    EvidenceIndex,
+)
 from .extraction_engine import ExtractionEngine
 from .pdf_reader import PDFReader, read_pdf
 from .pdf_annotator import PDFAnnotator, highlight_pdf
@@ -48,6 +54,10 @@ __all__ = [
     "SecondaryCitation",
     "ContainerSource",
     "RootSource",
+    "PageEvidence",
+    "TableEvidence",
+    "FigureEvidence",
+    "EvidenceIndex",
     "ExtractionEngine",
     "PDFReader",
     "read_pdf",

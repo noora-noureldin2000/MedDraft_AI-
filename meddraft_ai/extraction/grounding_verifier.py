@@ -32,12 +32,17 @@ class GroundingVerifier:
         tables_json: Optional[List[Dict[str, Any]]] = None,
         pdf_annotator: Optional[Any] = None,
         fuzzy_threshold: float = 95.0,
+        evidence: Optional[Any] = None,
+        fuzzy_threshold_ocr: Optional[float] = None,
     ):
         self.page_texts = page_texts
         self.tables_json = tables_json or []
         self.annotator = pdf_annotator
         self.fuzzy_threshold = fuzzy_threshold
+        self.fuzzy_threshold_ocr = fuzzy_threshold_ocr or 92.0
         self.verified_quotes: List[str] = []
+        # Phase B: EvidenceIndex takes precedence when supplied
+        self.evidence = evidence
 
     @staticmethod
     def normalize_text(text: str) -> str:
@@ -100,6 +105,19 @@ class GroundingVerifier:
     def _table_search_texts(self, page_no: int, section_header: Optional[str]) -> List[str]:
         """Normalised markdown/record text for tables on *page_no* or matching *section_header*."""
         texts: List[str] = []
+        if self.evidence is not None:
+            for tbl in self.evidence.tables:
+                same_page = tbl.page == page_no
+                same_table = bool(section_header) and tbl.table_id == section_header
+                if not (same_page or same_table):
+                    continue
+                table_markdown = self.normalize_text(tbl.markdown)
+                table_records = self.normalize_text(json.dumps(tbl.records, ensure_ascii=False))
+                if table_markdown:
+                    texts.append(table_markdown)
+                if table_records:
+                    texts.append(table_records)
+
         for table in self.tables_json:
             same_page = table.get("page") == page_no
             same_table = bool(section_header) and table.get("table_id") == section_header
@@ -113,27 +131,210 @@ class GroundingVerifier:
                 texts.append(table_records)
         return texts
 
-    def _build_candidate_search_texts(self, page_no: int, section_header: Optional[str]) -> List[str]:
-        """Builds page text, cross-page boundary windows, and table texts."""
-        candidates: List[str] = []
-        target_page = self.page_texts.get(page_no, "")
-        norm_target = self.normalize_text(target_page)
-        if norm_target:
-            candidates.append(norm_target)
+    def _build_candidate_search_texts(self, page_no: int, section_header: Optional[str]) -> List[Tuple[str, str]]:
+        """Builds (source_label, normalised_text) pairs for quote matching.
 
-        # Cross-page boundary stitches
-        prev_page = self.page_texts.get(page_no - 1, "")
-        if prev_page and target_page:
-            boundary_prev = self.normalize_text(prev_page[-600:] + " " + target_page[:600])
-            candidates.append(boundary_prev)
+        When an EvidenceIndex is supplied it takes precedence, providing
+        candidates from every available engine.  The legacy page_texts path
+        is used as fallback so existing tests and callers stay green.
+        """
+        candidates: List[Tuple[str, str]] = []
 
-        next_page = self.page_texts.get(page_no + 1, "")
-        if next_page and target_page:
-            boundary_next = self.normalize_text(target_page[-600:] + " " + next_page[:600])
-            candidates.append(boundary_next)
+        if self.evidence is not None:
+            # EvidenceIndex path — union of all engines for this page
+            for source, text in self.evidence.page_candidates(page_no):
+                norm = self.normalize_text(text)
+                if norm:
+                    candidates.append((source, norm))
 
-        candidates.extend(self._table_search_texts(page_no, section_header))
+            # Table candidates from EvidenceIndex
+            for source, text in self.evidence.table_candidates(page=page_no, table_id=section_header):
+                norm = self.normalize_text(text)
+                if norm:
+                    candidates.append((source, norm))
+
+            # Figure candidates (for figure-derived fields only)
+            if section_header and str(section_header).startswith("Figure"):
+                for source, text in self.evidence.figure_candidates(page=page_no):
+                    norm = self.normalize_text(text)
+                    if norm:
+                        candidates.append((source, norm))
+
+            # Cross-page boundary stitches from EvidenceIndex
+            prev_ev = self.evidence.pages.get(page_no - 1)
+            curr_ev = self.evidence.pages.get(page_no)
+            next_ev = self.evidence.pages.get(page_no + 1)
+            if prev_ev and curr_ev and prev_ev.text and curr_ev.text:
+                boundary = self.normalize_text(prev_ev.text[-600:] + " " + curr_ev.text[:600])
+                candidates.append(("boundary_prev", boundary))
+            if curr_ev and next_ev and curr_ev.text and next_ev.text:
+                boundary = self.normalize_text(curr_ev.text[-600:] + " " + next_ev.text[:600])
+                candidates.append(("boundary_next", boundary))
+
+            # Also include legacy page_texts as additional candidates
+            # (ensures backward-compatibility even when evidence is set)
+            target_page = self.page_texts.get(page_no, "")
+            norm_legacy = self.normalize_text(target_page)
+            if norm_legacy:
+                candidates.append(("pdfplumber", norm_legacy))
+
+        else:
+            # Legacy path — unchanged behaviour
+            target_page = self.page_texts.get(page_no, "")
+            norm_target = self.normalize_text(target_page)
+            if norm_target:
+                candidates.append(("pdfplumber", norm_target))
+
+            # Cross-page boundary stitches
+            prev_page = self.page_texts.get(page_no - 1, "")
+            if prev_page and target_page:
+                boundary_prev = self.normalize_text(prev_page[-600:] + " " + target_page[:600])
+                candidates.append(("boundary_prev", boundary_prev))
+
+            next_page = self.page_texts.get(page_no + 1, "")
+            if next_page and target_page:
+                boundary_next = self.normalize_text(target_page[-600:] + " " + next_page[:600])
+                candidates.append(("boundary_next", boundary_next))
+
+            table_texts = self._table_search_texts(page_no, section_header)
+            for txt in table_texts:
+                candidates.append(("table", txt))
+
         return candidates
+
+    def _known_pages(self) -> set:
+        """Return the set of valid page numbers from all sources."""
+        pages = set(self.page_texts.keys())
+        if self.evidence is not None:
+            pages |= set(self.evidence.pages.keys())
+        return pages
+
+    def _check_value_sanity(self, value: Any) -> Tuple[bool, Optional[str]]:
+        """Run sanity checks on clinical outcome values (events <= total, CI order, quartiles)."""
+        if value is None:
+            return True, None
+
+        val_dict: Dict[str, Any] = {}
+        if isinstance(value, BaseModel):
+            val_dict = value.model_dump()
+        elif isinstance(value, dict):
+            val_dict = value
+        elif isinstance(value, str):
+            val_dict = {"raw": value}
+
+        # 1. events <= total check in any string field
+        for k, v in val_dict.items():
+            if isinstance(v, str):
+                for match in re.finditer(r"\b(\d+)\s*/\s*(\d+)\b", v):
+                    events, total = int(match.group(1)), int(match.group(2))
+                    if events > total:
+                        return False, f"Sanity check failure in '{k}': events ({events}) > total ({total})."
+
+        # 2. CI lower <= upper check
+        ci_str = val_dict.get("confidence_interval_95") or val_dict.get("confidence_interval")
+        if isinstance(ci_str, str):
+            m = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:to|–|-)\s*(-?\d+(?:\.\d+)?)", ci_str)
+            if m:
+                try:
+                    lower = float(m.group(1))
+                    upper = float(m.group(2))
+                    if lower > upper:
+                        return False, f"Sanity check failure: CI lower bound ({lower}) > upper bound ({upper})."
+                except ValueError:
+                    pass
+
+        # 3. IQR / Quartiles: q1 <= median <= q3
+        q1 = val_dict.get("q1")
+        med = val_dict.get("median")
+        q3 = val_dict.get("q3")
+        if q1 is not None and med is not None and q3 is not None:
+            try:
+                f_q1, f_med, f_q3 = float(q1), float(med), float(q3)
+                if not (f_q1 <= f_med <= f_q3):
+                    return False, f"Sanity check failure: quartile order violated ({f_q1} <= {f_med} <= {f_q3})."
+            except (ValueError, TypeError):
+                pass
+
+        return True, None
+
+    def verify_table_claim(
+        self,
+        table_id: str,
+        value: Any,
+        row_hint: Optional[str] = None,
+        column_hint: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Verify that value tokens appear in the specific table and row."""
+        # 1. Run sanity checks
+        ok_sanity, err_sanity = self._check_value_sanity(value)
+        if not ok_sanity:
+            return False, err_sanity
+
+        # 2. table_id must exist
+        table_obj: Any = None
+        if self.evidence is not None:
+            table_obj = self.evidence.get_table(table_id)
+        if table_obj is None:
+            for t in self.tables_json:
+                if t.get("table_id") == table_id:
+                    table_obj = t
+                    break
+
+        if table_obj is None:
+            return False, f"Table '{table_id}' not found in extracted tables."
+
+        records = table_obj.records if hasattr(table_obj, "records") else table_obj.get("records", [])
+        markdown = table_obj.markdown if hasattr(table_obj, "markdown") else table_obj.get("markdown", "")
+
+        value_nums = self.extract_numeric_tokens(value)
+        if not value_nums:
+            return True, None
+
+        # 3. Row matching in records
+        if records:
+            matched_row = None
+            if row_hint:
+                norm_hint = self.normalize_text(row_hint)
+                best_score = 0.0
+                for row in records:
+                    row_texts = [self.normalize_text(str(v)) for v in row.values() if v is not None]
+                    row_score = max((self._fuzzy_similarity(norm_hint, cell_t) for cell_t in row_texts), default=0.0)
+                    if row_score > best_score:
+                        best_score = row_score
+                        matched_row = row
+                if best_score < 50.0:
+                    matched_row = None
+
+            if row_hint and matched_row is None:
+                return False, f"Row matching '{row_hint}' not found in table '{table_id}'."
+
+            if matched_row is not None:
+                row_nums = set(self.extract_numeric_tokens(list(matched_row.values())))
+                missing = [n for n in value_nums if n not in row_nums]
+                if missing:
+                    return False, f"Numbers {missing} from value not found in row '{row_hint}' of table '{table_id}'."
+                return True, None
+
+            # If no row_hint, check if any single row contains all value numbers
+            found_in_any_row = False
+            for row in records:
+                row_nums = set(self.extract_numeric_tokens(list(row.values())))
+                if all(n in row_nums for n in value_nums):
+                    found_in_any_row = True
+                    break
+            if not found_in_any_row:
+                return False, f"Numbers {value_nums} do not co-occur in any single row of table '{table_id}'."
+            return True, None
+
+        # Fallback to markdown if records are empty
+        if markdown:
+            md_nums = set(self.extract_numeric_tokens(markdown))
+            missing = [n for n in value_nums if n not in md_nums]
+            if missing:
+                return False, f"Numbers {missing} not found in markdown of table '{table_id}'."
+            return True, None
+
+        return True, None
 
     def verify_field(self, field_path: str, field: GroundedField[Any]) -> Tuple[bool, Optional[str]]:
         """Verifies a single GroundedField in-place, returning (success, error_message)."""
@@ -155,7 +356,8 @@ class GroundingVerifier:
                 field.verification_note = err
                 return False, err
 
-            if not field.page_number or field.page_number not in self.page_texts:
+            known = self._known_pages()
+            if not field.page_number or field.page_number not in known:
                 field.verified_in_source = False
                 err = f"[{field_path}] Invalid page_number ({field.page_number}) for UNCLEAR ambiguity quote."
                 field.verification_note = err
@@ -163,19 +365,50 @@ class GroundingVerifier:
 
             norm_quote = self.normalize_text(field.verbatim_quote)
             candidates = self._build_candidate_search_texts(field.page_number, field.section_header)
-            best_score = max((self._fuzzy_similarity(norm_quote, cand) for cand in candidates), default=0.0)
+            best_score = 0.0
+            best_source = None
+            for source, cand_text in candidates:
+                score = self._fuzzy_similarity(norm_quote, cand_text)
+                if score > best_score:
+                    best_score = score
+                    best_source = source
 
-            if best_score < self.fuzzy_threshold:
+            # Determine threshold: use lower threshold for OCR-sourced candidates
+            threshold = self._effective_threshold(best_source)
+            if best_score < threshold:
                 field.verified_in_source = False
                 err = f"[{field_path}] Ambiguity quote not found on page {field.page_number} (score: {best_score:.1f}%)."
                 field.verification_note = err
                 return False, err
 
             field.verified_in_source = True
+            field.grounding_source = best_source
+            field.match_score = best_score
             field.verification_note = f"Ambiguity documented from source (quote verified, match={best_score:.1f}%)."
             if field.verbatim_quote not in self.verified_quotes:
                 self.verified_quotes.append(field.verbatim_quote)
             return True, None
+
+        # Clinical value sanity check (events <= total, CI order, quartiles)
+        ok_sanity, err_sanity = self._check_value_sanity(field.value)
+        if not ok_sanity:
+            field.verified_in_source = False
+            field.verification_note = err_sanity
+            return False, f"[{field_path}] {err_sanity}"
+
+        # Table-cell verification if source_table_id is specified
+        tbl_id = getattr(field.value, "source_table_id", None)
+        if isinstance(field.value, dict):
+            tbl_id = field.value.get("source_table_id")
+        if tbl_id:
+            row_h = getattr(field.value, "outcome_name", None) or (
+                field.value.get("outcome_name") if isinstance(field.value, dict) else None
+            )
+            ok_tbl, err_tbl = self.verify_table_claim(tbl_id, field.value, row_hint=row_h)
+            if not ok_tbl:
+                field.verified_in_source = False
+                field.verification_note = err_tbl
+                return False, f"[{field_path}] {err_tbl}"
 
         if not field.verbatim_quote or len(field.verbatim_quote.strip()) < 4:
             field.verified_in_source = False
@@ -183,22 +416,30 @@ class GroundingVerifier:
             field.verification_note = err
             return False, err
 
-        if not field.page_number or field.page_number not in self.page_texts:
+        known = self._known_pages()
+        if not field.page_number or field.page_number not in known:
             field.verified_in_source = False
-            err = f"[{field_path}] Invalid page_number ({field.page_number}). Document has pages {sorted(self.page_texts.keys())}."
+            err = f"[{field_path}] Invalid page_number ({field.page_number}). Document has pages {sorted(known)}."
             field.verification_note = err
             return False, err
 
         norm_quote = self.normalize_text(field.verbatim_quote)
         candidates = self._build_candidate_search_texts(field.page_number, field.section_header)
 
-        best_score = max((self._fuzzy_similarity(norm_quote, cand) for cand in candidates), default=0.0)
+        best_score = 0.0
+        best_source = None
+        for source, cand_text in candidates:
+            score = self._fuzzy_similarity(norm_quote, cand_text)
+            if score > best_score:
+                best_score = score
+                best_source = source
 
-        if best_score < self.fuzzy_threshold:
+        threshold = self._effective_threshold(best_source)
+        if best_score < threshold:
             field.verified_in_source = False
             err = (
                 f"[{field_path}] Verbatim quote not found on page {field.page_number} "
-                f"(best match score: {best_score:.1f}% < {self.fuzzy_threshold}%). "
+                f"(best match score: {best_score:.1f}% < {threshold}%). "
                 f"Ensure quote is an exact character substring."
             )
             field.verification_note = err
@@ -225,6 +466,8 @@ class GroundingVerifier:
                 return False, err
 
         field.verified_in_source = True
+        field.grounding_source = best_source
+        field.match_score = best_score
         field.verification_note = f"Verified (match={best_score:.1f}%)"
 
         # Accumulate quote for single-pass write-once PDF annotation
@@ -232,6 +475,15 @@ class GroundingVerifier:
             self.verified_quotes.append(field.verbatim_quote)
 
         return True, None
+
+    def _effective_threshold(self, source: Optional[str]) -> float:
+        """Return the fuzzy threshold appropriate for the matched source.
+
+        OCR-sourced candidates get a lower bar because OCR text is noisier.
+        """
+        if source and source in ("tesseract", "figure_ocr"):
+            return self.fuzzy_threshold_ocr
+        return self.fuzzy_threshold
 
     def save_annotated_pdf(self, output_path: str | Path) -> Optional[str]:
         """Writes all accumulated verified quotes in a single batch pass to destination PDF."""
