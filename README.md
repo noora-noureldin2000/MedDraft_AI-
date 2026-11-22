@@ -4,7 +4,7 @@
 
 `MedDraft_AI` is an autonomous local-first pipeline designed exclusively for academic medical research writing — manuscripts, theses, dissertations, systematic reviews, narrative reviews, scoping reviews, meta-analyses, protocols, and clinical reports.
 
-Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automates deep literature retrieval, source-anchored PDF extraction, IMRAD drafting, live DOI reference validation, APA/AMA style formatting, and on-demand AI-text humanization. It also ships an agent-ready **Google Images search tool** that chains three free API tiers and a Playwright fallback, so visual references (figures, anatomy, histology, devices) are available without burning a single provider's quota.
+Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automates deep literature retrieval, source-anchored PDF extraction, IMRAD drafting, live DOI reference validation, APA/AMA style formatting, and on-demand AI-text humanization. It also ships an agent-ready **Google Images search tool** that chains SerpApi and Brave with a Playwright fallback, so visual references (figures, anatomy, histology, devices) are available without burning a single provider's quota.
 
 ---
 
@@ -36,7 +36,8 @@ Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automat
 10. **Post-Humanization Re-Verification**:
    - After the optional humanization pass, the full draft's references are re-validated live, since humanization can alter citation formatting.
 11. **Google Images Search with Free-Tier Fallback**:
-   - `refs image-search` chains **SerpApi → Google Custom Search → Brave → Playwright**, skips exhausted free tiers through a local quota ledger, and returns compact `{title, image_url, thumbnail_url, context_url}` results for LLM context windows.
+   - `refs image-search` chains **SerpApi → Brave → Playwright**, skips exhausted free tiers through a local quota ledger, and returns compact `{title, image_url, thumbnail_url, context_url}` results for LLM context windows.
+   - Google Custom Search JSON API remains supported as a **legacy** provider for grandfathered projects, but Google closed it to new customers and existing access ends 2027-01-01.
    - Includes keyword relevance scoring (`--require-term`, `--exclude-term`, `--prefer-host`), `![Title](image_url)` rendering, an OpenAI-style tool schema plus dispatcher for agent binding, and optional browser screenshot capture for vision models.
    - See [Google Images Search with Free-Tier Fallback](#google-images-search-with-free-tier-fallback).
 
@@ -149,14 +150,16 @@ python -m meddraft_ai refs plan-angles "SGLT2 inhibitors renal outcomes"
 
 ### Google Images Search with Free-Tier Fallback
 
-`refs image-search` answers visual reference requests (figures, anatomy, histology, devices) by chaining four providers. It stops as soon as the requested number of unique images is filled, and a local ledger skips any provider whose free tier is used up.
+`refs image-search` answers visual reference requests (figures, anatomy, histology, devices) by chaining SerpApi → Brave → Playwright. It stops as soon as the requested number of unique images is filled, and a local ledger skips any provider whose free tier is used up. Google Custom Search JSON API remains supported as a legacy provider for grandfathered projects.
 
 | Order | Provider | Free tier | Credentials |
 | --- | --- | --- | --- |
 | 1 | SerpApi Google Images | 100 searches/month | `SERP_API_KEY` |
-| 2 | Google Custom Search JSON API | 100 queries/day | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` |
-| 3 | Brave Images API | 2,000 queries/month | `BRAVE_API_KEY` |
-| 4 | Playwright Google Images | No API quota | Node.js + built browser engine |
+| 2 | Brave Images API | 2,000 queries/month | `BRAVE_API_KEY` |
+| 3 | Playwright Google Images | No API quota | Node.js + built browser engine |
+| Legacy | Google Custom Search JSON API | 100 queries/day, grandfathered projects only | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` |
+
+> **Google CSE status:** Google closed the Custom Search JSON API to new customers, and existing access ends on **2027-01-01**. A new project receives `403 Permission denied on the service` even with the API enabled, a valid key, and a valid `cx`. Add `google_cse` to `IMAGE_SEARCH_PROVIDER_ORDER` only if the project already had access before the closure.
 
 ```bash
 # Show which providers are configured and how much local free-tier quota is left
@@ -173,13 +176,17 @@ python -m meddraft_ai refs image-search "alveolar bone radiograph" \
 # Force one provider, or force the no-key browser fallback with a screenshot
 python -m meddraft_ai refs image-search "suture techniques" --provider-order brave --no-fallback
 python -m meddraft_ai refs image-search "suture techniques" --provider-order browser --screenshot
+
+# Legacy only: explicitly re-enable Google CSE for a grandfathered project
+python -m meddraft_ai refs image-search "suture techniques" \
+  --provider-order serpapi,google_cse,brave,browser
 ```
 
 Setup:
 
 - **SerpApi:** create an account and copy the private API key into `SERP_API_KEY`.
-- **Google CSE:** create a Programmable Search Engine, enable **Image search** and **Search the entire web**, copy the Search Engine ID into `GOOGLE_CSE_ID`, then enable the **Custom Search API** in Google Cloud Console and put a Cloud API key in `GOOGLE_CSE_API_KEY`. A Gemini API key does not authorise Custom Search.
 - **Brave:** subscribe to the free Search plan and put the key in `BRAVE_API_KEY`.
+- **Google CSE (legacy only):** create a Programmable Search Engine, enable **Image search** and **Search the entire web**, copy the Search Engine ID into `GOOGLE_CSE_ID`, then enable the **Custom Search API** and create an API key in the same Cloud project. New projects are not entitled and will receive `403 Permission denied on the service`; use SerpApi or Brave instead.
 - **Browser fallback:** run `npm install && npm run build` in `meddraft_ai/search/browser_engine/`. Google may present a CAPTCHA; with the default `BROWSER_HEADLESS=false` the window opens so it can be solved manually.
 
 The quota ledger lives at `.cache/image_search_quota.json` (gitignored). It records successes, daily/monthly rollovers, and short 429 cooldowns. It is best-effort: it cannot see usage from other machines or other tools sharing a key, so the provider's own dashboard remains authoritative.
@@ -256,7 +263,9 @@ Three skill layers are wired into the pipeline:
 
 **Pipeline prompt packs (`meddraft_ai/prompts/`)** — domain prompts indexed at runtime by the `SkillRegistry` (`meddraft_ai/core/skill_registry.py`). Newly added packs must be listed in `REGISTERED_PROMPT_SUBDIRS` (registration is enforced by `tests/test_skill_registry.py`):
 
-`academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `systematic-review-discussion` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
+`academic-writing` · `academic_research_skills` · `academic-search-agent` · `citation-integrity` · `surgical-word-reduction` · `claude_scientific_writer` · `docx` · `pptx` · `doi_reference_validator` · `humanizer-main` · `humanizer_noora` · `language-refinement` · `medical-clinicaltrials` · `medical_research_skills` · `med_paper_assistant` · `pdf` · `research_surfer` · `sciwrite` · `secondary-citation-extractor` · `thesis-discussion-writer` · `systematic-review-discussion` · `claim-source-verification` · `citation-verifier` · `stats-reporting-audit` · `submission-audit` · `rebuttal-response` · `paper-reviewer` · `manuscript-optimizer` · `results-section-revision` · `figure-planner` · `figure-style` · `scientific-prose-style` · `anti-defensive-writing` · `write-scientific-manuscript` · `data-availability` · `draft-marker-discipline` · `paper-bootstrap` · `review-article-architecture` · `paper-analyzer` · `results-analysis` · `nature-portfolio-playbook` · `nature-paper-skills` (manifest + section-contract references)
+
+The `pptx` pack adds a 16:9 native-shape deck engine (blueprint JSON → editable `.pptx`) and quota-aware figure sourcing: `scripts/fetch_figures.py` fills figure slots through the SerpApi → Brave → Playwright chain (legacy Google CSE opt-in) and writes a provenance sidecar per image. It is described in `meddraft_ai/prompts/pptx/SKILL.md` and auto-routes on PowerPoint/slide-deck language.
 
 Root-level rule files in `meddraft_ai/prompts/` (`Thesis_guide.md` — the pipeline mirror of the `thesis-master-guide` agent skill — plus `apa_reporting.md`, `agent_instructions.md`, `arabic-mixed-rtl.md`, `document_formatting.md`, `humanizer_general.md`, `proofreading.md`) are indexed automatically. `arabic-mixed-rtl.md` is a standalone skill selected by script detection rather than topic keywords: any request mixing Arabic and Latin letters, or naming Arabic/RTL formatting for a document, routes to it (see `meddraft_ai/core/language_routing.py` and `tests/test_skill_registry.py`).
 

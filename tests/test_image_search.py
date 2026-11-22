@@ -242,10 +242,13 @@ class TestProviderOrder:
         order = image_search.resolve_provider_order("google,serp,brave,playwright,nope")
         assert order == ["google_cse", "serpapi", "brave", "browser"]
 
-    def test_empty_order_falls_back_to_all_providers(self):
-        assert image_search.resolve_provider_order("") == list(
-            image_search.DEFAULT_PROVIDER_ORDER
-        )
+    def test_empty_order_falls_back_to_default_chain_without_legacy_google(self):
+        assert image_search.resolve_provider_order("") == [
+            "serpapi",
+            "brave",
+            "browser",
+        ]
+        assert "google_cse" not in image_search.DEFAULT_PROVIDER_ORDER
 
 
 class TestSearchChain:

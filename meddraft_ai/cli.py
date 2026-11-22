@@ -400,6 +400,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                             f"{quota['remaining']} left, resets {reset}"
                         )
                     lines.append(f"{status['provider']}: {state} | {usage}")
+                lines = [
+                    line + (" | legacy" if status.get("legacy") else "")
+                    for line, status in zip(lines, statuses)
+                ]
                 print("\n".join(lines))
             return 0
         else:

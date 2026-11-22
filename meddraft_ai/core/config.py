@@ -85,7 +85,7 @@ class Config:
         os.getenv("BRAVE_SEARCH_API_KEY", ""),
     ))
     IMAGE_SEARCH_PROVIDER_ORDER: str = field(default_factory=lambda: os.getenv(
-        "IMAGE_SEARCH_PROVIDER_ORDER", "serpapi,google_cse,brave,browser"
+        "IMAGE_SEARCH_PROVIDER_ORDER", "serpapi,brave,browser"
     ))
     IMAGE_SEARCH_TIMEOUT: int = field(default_factory=lambda: int(os.getenv("IMAGE_SEARCH_TIMEOUT", "20")))
     IMAGE_SEARCH_BROWSER_TIMEOUT: int = field(default_factory=lambda: int(

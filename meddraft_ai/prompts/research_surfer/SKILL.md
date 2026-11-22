@@ -31,7 +31,7 @@ This produces `meddraft_ai/search/browser_engine/dist/cli.js`, which is committe
 ### 2. Omnichannel Strategy
 - **API-First**: Always check PubMed (`search_pubmed_api`) or ScienceDirect (`search_sciencedirect_api`) first for biomedical and scientific queries, as APIs do not trigger Cloudflare or CAPTCHA limits.
 - **Browser-Fallback**: Use Google Scholar Playwright surfing (`refs scholar-search` or `refs deep-search`) for broad searches, citation network tracking, or when APIs yield insufficient results.
-- **Image-Fallback**: Use `refs image-search` only for visual references (figures, anatomy, histology, devices). It chains SerpApi -> Google CSE -> Brave -> Playwright and skips exhausted free tiers. Never use it for literature discovery.
+- **Image-Fallback**: Use `refs image-search` only for visual references (figures, anatomy, histology, devices). It chains SerpApi -> Brave -> Playwright and skips exhausted free tiers. Google Custom Search JSON API is legacy-only (closed to new customers, ends 2027-01-01) and is not in the default chain. Never use it for literature discovery.
 - **Deduplication**: Automatically deduplicate retrieved papers by DOI or Jaccard title similarity (>0.85).
 
 ### 2b. Image Search Discipline

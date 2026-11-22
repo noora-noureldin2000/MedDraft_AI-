@@ -3,9 +3,14 @@
 Search order (first configured, non-exhausted provider wins):
 
 1. ``serpapi``    — SerpApi Google Images (100 searches/month free)
-2. ``google_cse`` — Google Custom Search JSON API (100 queries/day free)
-3. ``brave``      — Brave Images API (2,000 queries/month free)
-4. ``browser``    — Playwright Google Images scrape (no API key, last resort)
+2. ``brave``      — Brave Images API (2,000 queries/month free)
+3. ``browser``    — Playwright Google Images scrape (no API key, last resort)
+
+``google_cse`` (Google Custom Search JSON API) is still supported for
+grandfathered projects, but Google closed the API to new customers and will
+stop serving existing customers on 2027-01-01. It is therefore excluded from
+the default chain; add it explicitly with ``IMAGE_SEARCH_PROVIDER_ORDER`` if
+your project already had access before the closure.
 
 A small JSON ledger (``.cache/image_search_quota.json``) records local usage so
 the chain stops spending an exhausted free tier and falls through to the next
@@ -49,12 +54,12 @@ SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 BRAVE_IMAGES_ENDPOINT = "https://api.search.brave.com/res/v1/images/search"
 
-DEFAULT_PROVIDER_ORDER = ("serpapi", "google_cse", "brave", "browser")
+DEFAULT_PROVIDER_ORDER = ("serpapi", "brave", "browser")
 MAX_RESULTS = 10  # Google CSE accepts at most 10 results per request.
 
 PROVIDER_LABELS: dict[str, str] = {
     "serpapi": "SerpApi Google Images",
-    "google_cse": "Google Custom Search JSON API",
+    "google_cse": "Google Custom Search JSON API (legacy)",
     "brave": "Brave Images API",
     "browser": "Playwright Google Images (no key)",
 }
@@ -626,6 +631,7 @@ def get_provider_status(ledger: QuotaLedger | None = None) -> list[dict[str, Any
                 "label": label,
                 "configured": configured,
                 "missing": None if configured else hint,
+                "legacy": provider == "google_cse",
                 "free_tier": FREE_TIER_LIMITS[provider]["note"],
                 "quota": ledger.status(provider),
             }

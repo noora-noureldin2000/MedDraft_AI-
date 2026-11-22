@@ -28,7 +28,10 @@ FREE_TIER_LIMITS: dict[str, dict[str, Any]] = {
     "google_cse": {
         "limit": 100,
         "period": "day",
-        "note": "Google Custom Search JSON API: 100 queries/day free (10,000/day cap).",
+        "note": (
+            "Legacy API: 100 queries/day for grandfathered projects only. "
+            "Closed to new customers; existing access ends 2027-01-01."
+        ),
     },
     "brave": {
         "limit": 2000,
