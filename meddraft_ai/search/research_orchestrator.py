@@ -140,6 +140,29 @@ class ResearchOrchestrator:
             logger.warning(f"ClinicalTrials.gov fetch failed: {e}")
             return {"success": False, "error": str(e), "study": {}}
 
+    def search_images(self, query: str, limit: int = 3, **kwargs) -> Dict[str, Any]:
+        """Google Images through SerpApi -> Google CSE -> Brave -> Playwright.
+
+        Returns the lightweight search envelope (``success``, ``results``,
+        ``attempts``). Never raises; exhausted free tiers are skipped by the
+        local quota ledger. ``kwargs`` are forwarded to
+        :func:`meddraft_ai.search.image_search.search_images`.
+        """
+        from meddraft_ai.search.image_search import search_images as run_image_search
+        try:
+            return run_image_search(query, num_results=limit, **kwargs)
+        except Exception as e:
+            logger.warning(f"Image search failed: {e}")
+            return {
+                "success": False,
+                "query": query,
+                "provider": None,
+                "count": 0,
+                "results": [],
+                "error": str(e),
+                "attempts": [],
+            }
+
     def deep_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Unified, deduplicated search across primary and secondary databases."""
         papers = []

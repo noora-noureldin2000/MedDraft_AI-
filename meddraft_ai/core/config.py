@@ -67,6 +67,38 @@ class Config:
     SCIENCEDIRECT_API_KEY: str = field(default_factory=lambda: os.getenv("SCIENCEDIRECT_API_KEY", ""))
     APIFY_TOKEN: str = field(default_factory=lambda: os.getenv("APIFY_TOKEN", ""))
     FINDPAPERS_EMAIL: str = field(default_factory=lambda: os.getenv("FINDPAPERS_EMAIL", ""))
+
+    # --- Image Search Integrations (provider-chained fallback) ---
+    # SerpApi Google Images -> Google Custom Search JSON API -> Brave Images.
+    # Free tiers: SerpApi 100/month, Google CSE 100/day, Brave 2,000/month.
+    SERP_API_KEY: str = field(default_factory=lambda: os.getenv("SERP_API_KEY", os.getenv("SERPAPI_API_KEY", "")))
+    GOOGLE_CSE_API_KEY: str = field(default_factory=lambda: os.getenv(
+        "GOOGLE_CSE_API_KEY",
+        os.getenv("GOOGLE_API_KEY", ""),
+    ))
+    GOOGLE_CSE_ID: str = field(default_factory=lambda: os.getenv(
+        "GOOGLE_CSE_ID",
+        os.getenv("GOOGLE_SEARCH_ENGINE_ID", os.getenv("GOOGLE_CX", os.getenv("Search engine ID", ""))),
+    ))
+    BRAVE_API_KEY: str = field(default_factory=lambda: os.getenv(
+        "BRAVE_API_KEY",
+        os.getenv("BRAVE_SEARCH_API_KEY", ""),
+    ))
+    IMAGE_SEARCH_PROVIDER_ORDER: str = field(default_factory=lambda: os.getenv(
+        "IMAGE_SEARCH_PROVIDER_ORDER", "serpapi,google_cse,brave,browser"
+    ))
+    IMAGE_SEARCH_TIMEOUT: int = field(default_factory=lambda: int(os.getenv("IMAGE_SEARCH_TIMEOUT", "20")))
+    IMAGE_SEARCH_BROWSER_TIMEOUT: int = field(default_factory=lambda: int(
+        os.getenv("IMAGE_SEARCH_BROWSER_TIMEOUT", "150")
+    ))
+    IMAGE_SEARCH_QUOTA_ENABLED: bool = field(default_factory=lambda: os.getenv(
+        "IMAGE_SEARCH_QUOTA_ENABLED", "true"
+    ).lower() == "true")
+    IMAGE_SEARCH_QUOTA_FILE: Path = field(default_factory=lambda: Path(
+        os.getenv("IMAGE_SEARCH_QUOTA_FILE", "")
+    ) if os.getenv("IMAGE_SEARCH_QUOTA_FILE") else (
+        Path(__file__).parent.parent.parent.resolve() / ".cache" / "image_search_quota.json"
+    ))
     
     # Browser Engine Automation
     BROWSER_HEADLESS: bool = field(default_factory=lambda: os.getenv("BROWSER_HEADLESS", "false").lower() == "true")
@@ -91,7 +123,13 @@ def load_config() -> Config:
                 data = json.load(f)
             for key, val in data.items():
                 if hasattr(default_config, key):
-                    if key in ("WORKSPACE_ROOT", "OUTPUT_DIR", "PROMPTS_DIR", "TEMPLATES_DIR"):
+                    if key in (
+                        "WORKSPACE_ROOT",
+                        "OUTPUT_DIR",
+                        "PROMPTS_DIR",
+                        "TEMPLATES_DIR",
+                        "IMAGE_SEARCH_QUOTA_FILE",
+                    ):
                         p = Path(val)
                         # Resolve relative paths against workspace root, not CWD
                         if not p.is_absolute():

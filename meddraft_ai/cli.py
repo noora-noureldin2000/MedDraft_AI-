@@ -6,6 +6,8 @@ Primary usage from the research-surfer skill:
     python -m meddraft_ai refs scholar-search "query" --limit 5
     python -m meddraft_ai refs deep-dive "doi_or_pmid_or_json"
     python -m meddraft_ai refs download '{"title": "...", "pdf_url": "..."}'
+    python -m meddraft_ai refs image-search "gingival sulcus histology" --limit 3 --markdown
+    python -m meddraft_ai refs image-providers
 
 Systematic-review Discussion tools:
 
@@ -88,6 +90,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Draft 3-5 structured Scholar search angles for a topic (search playbook).",
     )
     angles.add_argument("query", help="Research topic string.")
+
+    image = refs_sub.add_parser(
+        "image-search",
+        help="Google Images via SerpApi -> Google CSE -> Brave -> Playwright fallback.",
+    )
+    image.add_argument("query", help="Image search query.")
+    image.add_argument("--limit", type=int, default=3, help="Max images (default 3, max 10).")
+    image.add_argument(
+        "--provider-order",
+        default=None,
+        help="Comma-separated order: serpapi,google_cse,brave,browser (default: env or all).",
+    )
+    image.add_argument("--no-fallback", action="store_true", help="Only try the first provider.")
+    image.add_argument("--no-quota", action="store_true", help="Ignore the local free-tier quota ledger.")
+    image.add_argument(
+        "--safe-search", default="active", choices=["active", "off"], help="Safe-search mode."
+    )
+    image.add_argument(
+        "--require-term", action="append", default=[], help="Term that should appear in title/URL (repeatable)."
+    )
+    image.add_argument(
+        "--exclude-term", action="append", default=[], help="Term that disqualifies a result (repeatable)."
+    )
+    image.add_argument(
+        "--prefer-host", action="append", default=[], help="Preferred source host, e.g. ncbi.nlm.nih.gov (repeatable)."
+    )
+    image.add_argument(
+        "--screenshot",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="With the browser provider, also save a results screenshot (optional path).",
+    )
+    image.add_argument("--markdown", action="store_true", help="Emit ![Title](image_url) blocks.")
+    image.add_argument("--with-source", action="store_true", help="Include source pages in Markdown output.")
+    image.add_argument("--json", action="store_true", help="Force JSON output (default unless --markdown).")
+
+    image_status = refs_sub.add_parser(
+        "image-providers",
+        help="Show configured image providers and remaining local free-tier quota.",
+    )
+    image_status.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
 
     sr = sub.add_parser(
         "sr",
@@ -209,7 +253,20 @@ def _run_sr(args: argparse.Namespace) -> int:
         return 1
 
 
+def _configure_utf8_output() -> None:
+    """Prevent UnicodeEncodeError on Windows consoles (image titles can contain emoji)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _configure_utf8_output()
     args = build_parser().parse_args(argv)
 
     if args.command == "sr":
@@ -292,8 +349,61 @@ def main(argv: Optional[List[str]] = None) -> int:
                 {"success": True, "angles": plan_search_angles(args.query)},
                 indent=2,
             ))
+        elif args.refs_command == "image-search":
+            from meddraft_ai.search.image_search import render_markdown, search_images
+
+            result = search_images(
+                args.query,
+                num_results=args.limit,
+                provider_order=args.provider_order,
+                allow_fallback=not args.no_fallback,
+                use_quota=not args.no_quota,
+                safe_search=args.safe_search,
+                capture_screenshot=args.screenshot is not None,
+                screenshot_path=(
+                    None if args.screenshot in (None, "auto") else args.screenshot
+                ),
+                required_terms=args.require_term,
+                exclude_terms=args.exclude_term,
+                preferred_hosts=args.prefer_host,
+            )
+            if args.markdown:
+                print(render_markdown(result, include_source=args.with_source)
+                      or result.get("error") or "No images found.")
+            else:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result.get("success") else 1
+        elif args.refs_command == "image-providers":
+            from meddraft_ai.search.image_search import get_provider_status
+
+            statuses = get_provider_status()
+            if args.json:
+                print(json.dumps({"providers": statuses}, indent=2, ensure_ascii=False))
+            else:
+                lines = []
+                for status in statuses:
+                    if status["configured"]:
+                        state = (
+                            "available"
+                            if status["provider"] == "browser"
+                            else "credentials set"
+                        )
+                    else:
+                        state = f"missing {status['missing']}"
+                    quota = status["quota"]
+                    if quota["limit"] is None:
+                        usage = "no API quota"
+                    else:
+                        reset = (quota.get("reset_at") or "")[:10]
+                        usage = (
+                            f"{quota['used']}/{quota['limit']} used, "
+                            f"{quota['remaining']} left, resets {reset}"
+                        )
+                    lines.append(f"{status['provider']}: {state} | {usage}")
+                print("\n".join(lines))
+            return 0
         else:
-            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive, download, secondary-cite, trials-search, trials-get or plan-angles."}, indent=2))
+            print(json.dumps({"error": "No refs subcommand given. Use deep-search, scholar-search, deep-dive, download, secondary-cite, trials-search, trials-get, plan-angles, image-search or image-providers."}, indent=2))
             return 1
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))

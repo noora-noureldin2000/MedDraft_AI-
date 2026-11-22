@@ -26,6 +26,18 @@ from .search_planner import (
     should_stop_collecting,
     count_words,
 )
+from .image_search import (
+    search_images,
+    render_markdown,
+    get_provider_status,
+    get_image_search_tool_schema,
+    execute_image_search_tool,
+    resolve_provider_order,
+    QuotaLedger,
+    IMAGE_SEARCH_TOOL_NAME,
+    IMAGE_SEARCH_TOOL_SCHEMA,
+    IMAGE_SEARCH_RENDERING_HINT,
+)
 
 __all__ = [
     "search_pubmed_api",
@@ -50,4 +62,14 @@ __all__ = [
     "truncate_to_budget",
     "should_stop_collecting",
     "count_words",
+    "search_images",
+    "render_markdown",
+    "get_provider_status",
+    "get_image_search_tool_schema",
+    "execute_image_search_tool",
+    "resolve_provider_order",
+    "QuotaLedger",
+    "IMAGE_SEARCH_TOOL_NAME",
+    "IMAGE_SEARCH_TOOL_SCHEMA",
+    "IMAGE_SEARCH_RENDERING_HINT",
 ]

@@ -24,6 +24,9 @@ outputs/
 downloaded_papers/
 pdf_extractions/
 
+# Local runtime state (image-search free-tier ledger, caches)
+.cache/
+
 # Local research project data (input to --project-dir)
 projects/
 project_data/

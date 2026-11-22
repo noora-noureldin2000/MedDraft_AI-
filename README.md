@@ -4,7 +4,7 @@
 
 `MedDraft_AI` is an autonomous local-first pipeline designed exclusively for academic medical research writing — manuscripts, theses, dissertations, systematic reviews, narrative reviews, scoping reviews, meta-analyses, protocols, and clinical reports.
 
-Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automates deep literature retrieval, source-anchored PDF extraction, IMRAD drafting, live DOI reference validation, APA/AMA style formatting, and on-demand AI-text humanization.
+Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automates deep literature retrieval, source-anchored PDF extraction, IMRAD drafting, live DOI reference validation, APA/AMA style formatting, and on-demand AI-text humanization. It also ships an agent-ready **Google Images search tool** that chains three free API tiers and a Playwright fallback, so visual references (figures, anatomy, histology, devices) are available without burning a single provider's quota.
 
 ---
 
@@ -35,6 +35,10 @@ Derived from the `Mega_Medical_writer_Noora` architecture, `MedDraft_AI` automat
    - `--project-dir` loads protocol, results, and discussion notes (Markdown) from a local project folder and treats them as the authoritative source — no invented data, references, or protocol details. With `--type thesis`, this focuses generation on the Discussion and References chapters (inverted-funnel structure with required ending headers).
 10. **Post-Humanization Re-Verification**:
    - After the optional humanization pass, the full draft's references are re-validated live, since humanization can alter citation formatting.
+11. **Google Images Search with Free-Tier Fallback**:
+   - `refs image-search` chains **SerpApi → Google Custom Search → Brave → Playwright**, skips exhausted free tiers through a local quota ledger, and returns compact `{title, image_url, thumbnail_url, context_url}` results for LLM context windows.
+   - Includes keyword relevance scoring (`--require-term`, `--exclude-term`, `--prefer-host`), `![Title](image_url)` rendering, an OpenAI-style tool schema plus dispatcher for agent binding, and optional browser screenshot capture for vision models.
+   - See [Google Images Search with Free-Tier Fallback](#google-images-search-with-free-tier-fallback).
 
 ---
 
@@ -72,6 +76,12 @@ SIMPLE_MODEL=gpt-4o
 # Academic APIs (Optional but recommended)
 NCBI_API_KEY=your_ncbi_key
 SCIENCEDIRECT_API_KEY=your_elsevier_key
+
+# Google Images search (optional; any configured subset works)
+SERP_API_KEY=your_serpapi_key
+GOOGLE_CSE_API_KEY=your_google_cloud_key
+GOOGLE_CSE_ID=your_search_engine_id
+BRAVE_API_KEY=your_brave_key
 ```
 
 ---
@@ -136,6 +146,45 @@ python -m meddraft_ai refs trials-get NCT04368728
 # Draft structured Scholar search angles for a topic (search playbook)
 python -m meddraft_ai refs plan-angles "SGLT2 inhibitors renal outcomes"
 ```
+
+### Google Images Search with Free-Tier Fallback
+
+`refs image-search` answers visual reference requests (figures, anatomy, histology, devices) by chaining four providers. It stops as soon as the requested number of unique images is filled, and a local ledger skips any provider whose free tier is used up.
+
+| Order | Provider | Free tier | Credentials |
+| --- | --- | --- | --- |
+| 1 | SerpApi Google Images | 100 searches/month | `SERP_API_KEY` |
+| 2 | Google Custom Search JSON API | 100 queries/day | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` |
+| 3 | Brave Images API | 2,000 queries/month | `BRAVE_API_KEY` |
+| 4 | Playwright Google Images | No API quota | Node.js + built browser engine |
+
+```bash
+# Show which providers are configured and how much local free-tier quota is left
+python -m meddraft_ai refs image-providers
+# "credentials set" means present, not validated; run one search to confirm the key/API enablement.
+
+# Search and render Markdown images for a chat client
+python -m meddraft_ai refs image-search "gingival sulcus histology" --limit 3 --markdown
+
+# Relevance scoring: require a term, drop clipart, prefer an authoritative host
+python -m meddraft_ai refs image-search "alveolar bone radiograph" \
+  --require-term radiograph --exclude-term clipart --prefer-host ncbi.nlm.nih.gov
+
+# Force one provider, or force the no-key browser fallback with a screenshot
+python -m meddraft_ai refs image-search "suture techniques" --provider-order brave --no-fallback
+python -m meddraft_ai refs image-search "suture techniques" --provider-order browser --screenshot
+```
+
+Setup:
+
+- **SerpApi:** create an account and copy the private API key into `SERP_API_KEY`.
+- **Google CSE:** create a Programmable Search Engine, enable **Image search** and **Search the entire web**, copy the Search Engine ID into `GOOGLE_CSE_ID`, then enable the **Custom Search API** in Google Cloud Console and put a Cloud API key in `GOOGLE_CSE_API_KEY`. A Gemini API key does not authorise Custom Search.
+- **Brave:** subscribe to the free Search plan and put the key in `BRAVE_API_KEY`.
+- **Browser fallback:** run `npm install && npm run build` in `meddraft_ai/search/browser_engine/`. Google may present a CAPTCHA; with the default `BROWSER_HEADLESS=false` the window opens so it can be solved manually.
+
+The quota ledger lives at `.cache/image_search_quota.json` (gitignored). It records successes, daily/monthly rollovers, and short 429 cooldowns. It is best-effort: it cannot see usage from other machines or other tools sharing a key, so the provider's own dashboard remains authoritative.
+
+Agent binding: register `get_image_search_tool_schema()` in the model's `tools` list. The schema exposes `query`, `num_results`, `safe_search`, `required_terms`, and `exclude_terms`. Dispatch the model's arguments with `execute_image_search_tool(arguments)`; no manual translation is needed. Returned results are deliberately small (`title`, `image_url`, `thumbnail_url`, `context_url`, `width`, `height`, `provider`). Tell the model to render them as `![Title](image_url)`; `render_markdown(envelope)` does it directly. `image_url` can be passed straight to a multimodal model that accepts URLs, while `--screenshot` gives a local PNG for vision clients that require a file path.
 
 ### Systematic-Review Discussion CLI (`sr`)
 

@@ -31,7 +31,15 @@ This produces `meddraft_ai/search/browser_engine/dist/cli.js`, which is committe
 ### 2. Omnichannel Strategy
 - **API-First**: Always check PubMed (`search_pubmed_api`) or ScienceDirect (`search_sciencedirect_api`) first for biomedical and scientific queries, as APIs do not trigger Cloudflare or CAPTCHA limits.
 - **Browser-Fallback**: Use Google Scholar Playwright surfing (`refs scholar-search` or `refs deep-search`) for broad searches, citation network tracking, or when APIs yield insufficient results.
+- **Image-Fallback**: Use `refs image-search` only for visual references (figures, anatomy, histology, devices). It chains SerpApi -> Google CSE -> Brave -> Playwright and skips exhausted free tiers. Never use it for literature discovery.
 - **Deduplication**: Automatically deduplicate retrieved papers by DOI or Jaccard title similarity (>0.85).
+
+### 2b. Image Search Discipline
+- Write a visual query, not a research question: include modality, stain, view, or specimen (`"gingival sulcus histology H&E"`, `"alveolar bone radiograph"`).
+- Add `--require-term` for the feature that must be visible and `--exclude-term clipart --exclude-term logo` to drop junk. Use `--prefer-host` for authoritative sources such as `ncbi.nlm.nih.gov`.
+- Render results as `![Title](image_url)`. Do not paste raw JSON into the chat.
+- To inspect an image with a vision model, pass `image_url` directly when the model accepts URLs. For local-file-only clients, run the browser provider with `--screenshot` and use the returned PNG path.
+- If the browser provider reports a CAPTCHA, switch to an API provider or run headful and solve the challenge; do not retry in a loop.
 
 ### 3. Mapped DOM Navigation (session mode — preferred)
 For navigating arbitrary sites, start one persistent stealth browser session and drive it with JSONL on stdin; each reply is a single JSON line on stdout:
@@ -81,6 +89,11 @@ All commands below are run from the repo root. The Python CLI wraps the same sea
   
 - **Download Open-Access PDF**:
   `python -m meddraft_ai refs download "{\"title\": \"Paper Title\", \"pdf_url\": \"https://example.com/paper.pdf\"}"`
+
+- **Google Images with free-tier fallback**:
+  `python -m meddraft_ai refs image-search "gingival sulcus histology" --limit 3 --markdown`
+  `python -m meddraft_ai refs image-search "alveolar bone radiograph" --require-term radiograph --exclude-term clipart`
+  `python -m meddraft_ai refs image-providers`
 
 - **Session mode (persistent stealth browser, JSONL protocol)**:
   `node meddraft_ai/search/browser_engine/dist/cli.js --session`

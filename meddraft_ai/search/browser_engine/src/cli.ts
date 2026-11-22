@@ -2,6 +2,7 @@ import { HumanBrowser } from './human_browser.js';
 import { cleanScientificDOM } from './dom_compressor.js';
 import { ScholarSurfer } from './scholar_surfer.js';
 import { PubMedSurfer } from './pubmed_surfer.js';
+import { ImageSurfer } from './image_surfer.js';
 import { runSession } from './session.js';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -105,7 +106,9 @@ async function main() {
   } catch (error: any) {
     try {
       if (page) {
-        const debugPath = path.resolve(__dirname, '../../../../outputs/browser_error_debug.png');
+        const debugPath = command === 'image-search' && args[3]
+          ? path.resolve(args[3])
+          : path.resolve(__dirname, '../../../../outputs/browser_error_debug.png');
         const dir = path.dirname(debugPath);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
@@ -146,6 +149,35 @@ async function runCommand(command: string, args: string[], browser: HumanBrowser
     const surfer = new PubMedSurfer(browser);
     const results = await surfer.search(page, query, limit);
     console.log(JSON.stringify({ success: true, count: results.length, results }));
+
+  } else if (command === 'image-search') {
+    const query = args[1];
+    const limit = args[2] ? parseInt(args[2], 10) : 10;
+    const screenshotPath = args[3] || '';
+    if (!query) throw new Error('Usage: image-search <query> [limit] [screenshotPath]');
+
+    const surfer = new ImageSurfer(browser);
+    const results = await surfer.search(page, query, limit);
+
+    // Screenshot is for the agent's vision pass, not for scraping. It captures
+    // the rendered results grid after lazy-load scrolls have settled.
+    let savedScreenshot: string | null = null;
+    if (screenshotPath) {
+      const dir = path.dirname(screenshotPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      await browser.delay(800, 1400);
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      savedScreenshot = screenshotPath;
+    }
+
+    console.log(JSON.stringify({
+      success: true,
+      count: results.length,
+      results,
+      screenshot: savedScreenshot
+    }));
 
   } else if (command === 'navigate') {
     const url = args[1];
