@@ -27,6 +27,7 @@ REGISTERED_PROMPT_SUBDIRS: List[str] = [
     "sciwrite",
     "pdf",                  # Phase 2: newly registered
     "docx",                 # Phase 2: newly registered
+    "pptx",                 # Deck builder + sourced figures (Noora PPT design language)
     "thesis-discussion-writer",
     "systematic-review-discussion",  # SR/MA Discussion architect (zero-omission + GRADE)
     "secondary-citation-extractor",  # Nested/secondary citation tracing + dual attribution
@@ -151,6 +152,25 @@ AUTO_ROUTE_KEYWORDS: Dict[str, List[str]] = {
         "annotate pdf",
         "watermark",
         "pdf document",
+    ],
+    "pptx": [
+        "powerpoint",
+        "pptx",
+        "slide",
+        "slides",
+        "deck",
+        "slide deck",
+        "presentation deck",
+        "lecture slides",
+        "seminar slides",
+        "defense slides",
+        "thesis defense",
+        "journal club slides",
+        "make slides",
+        "build slides",
+        "create slides",
+        "presentation slides",
+        "conference slides",
     ],
     # Nature Paper Skills triggers (single source of truth in nature_integration).
     **_NATURE_TRIGGERS,

@@ -197,6 +197,33 @@ See `scientific-skills/pptx/SKILL.md` for complete PPTX creation documentation.
 
 ---
 
+## Sourced figures (MedDraft)
+
+When a deck needs a real anatomical, histological, device, or procedural image
+rather than a generated illustration, use the repo's provider-chained image
+search. It spends free tiers in order (SerpApi → Brave, with legacy Google CSE
+opt-in) and falls
+back to a keyless Playwright scrape, so one exhausted tier does not block the
+deck:
+
+```bash
+python -m meddraft_ai.cli refs image-providers
+python meddraft_ai/prompts/pptx/scripts/fetch_figures.py \
+  --blueprint deck.json --require-term histology --prefer-host ncbi.nlm.nih.gov
+```
+
+The script downloads, verifies, converts unsupported formats to PNG, writes a
+provenance sidecar, and fills `image_path` back into the blueprint. The full
+deck workflow, design engine, and licensing rules live in
+`meddraft_ai/prompts/pptx/SKILL.md`; provider and quota details live in
+`meddraft_ai/prompts/pptx/references/figure-sourcing.md`.
+
+Do not embed a publisher figure without permission. Prefer NIH, NCI, CDC, NLM,
+Wikimedia Commons, OpenStax, or user-supplied files, and always print a credit
+line.
+
+---
+
 ## Nano Banana Pro Script Reference
 
 ### generate_slide_image.py

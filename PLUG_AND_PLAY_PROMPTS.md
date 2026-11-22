@@ -1519,6 +1519,8 @@ python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANN
 | Trial record by NCT ID | `python -m meddraft_ai refs trials-get NCT04368728` |
 | Check `.bib` hygiene | `python meddraft_ai/prompts/citation-verifier/scripts/audit_bib.py "refs.bib"` |
 | Check figure references | `python .agents/skills/submission-audit/scripts/check_figure_refs.py "outputs/draft.md"` |
+| Build a slide deck | `python meddraft_ai/prompts/pptx/scripts/deck_builder.py deck.json -o talk.pptx` (blueprint → editable 16:9 deck; `--example` prints a starter JSON) |
+| Fill deck figure slots | `python meddraft_ai/prompts/pptx/scripts/fetch_figures.py --blueprint deck.json` (SerpApi → Brave → Playwright, legacy Google CSE opt-in; quota-aware; writes provenance sidecars) |
 | Browser session mode (multi-step nav) | `node meddraft_ai/search/browser_engine/dist/cli.js --session` (JSONL: goto/state/click/type/scroll/tabs/download/close) |
 
 ### Auto-routing signal cheatsheet (just describe the task — the registry routes it)
@@ -1535,6 +1537,7 @@ python main.py --parse-pdf "[PDF_PATH]" --out "[JSON_OUT]" --annotated-pdf "[ANN
 | claim support, does the source support, verify claims against | claim-source-verification |
 | statistical reporting, legend statistics, multiple-comparison correction | stats-reporting-audit |
 | figure plan, one claim per figure, legend sync | figure-planner / figure-style |
+| PowerPoint, PPTX, slide deck, lecture slides, presentation deck, thesis-defence slides | pptx (deck builder + sourced figures) |
 | review article, survey paper structure, perspective article | review-article-architecture |
 | data availability, data-sharing statement, accession number | data-availability |
 | systematic review discussion, meta-analysis discussion, GRADE certainty, pooled effect | systematic-review-discussion |

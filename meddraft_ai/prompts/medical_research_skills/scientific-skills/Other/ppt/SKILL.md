@@ -1,6 +1,6 @@
 ---
 name: ppt
-description: Create and export PPTX decks using the local HTML/JS PPT framework in `D:\SKILL\project\ppt`. Use this when you need to generate slides from a topic/outline, edit slide content via `projects/*.js`, preview as HTML, or export a `.pptx` without relying on an existing template.
+description: Create and export PPTX decks using the local HTML/JS PPT framework in the repo at `meddraft_ai/prompts/medical_research_skills/scientific-skills/Other/ppt`. Use this when you need to generate slides from a topic/outline, edit slide content via `projects/*.js`, preview as HTML, or export a `.pptx` without relying on an existing template. For a pure-Python blueprint deck, prefer `meddraft_ai/prompts/pptx/` instead.
 license: MIT
 author: AIPOCH
 ---
@@ -33,13 +33,13 @@ python scripts/validate_skill.py --help
 ## Dependencies
 
 - Python (3.10+ recommended)
-- Python packages listed in: `D:\SKILL\project\ppt\requirements.txt`
+- Python packages listed in: `requirements.txt` in this skill directory.
 
 ## Example Usage
 
 ### 1) Create a project file
 
-Create: `D:\SKILL\project\ppt\projects\demo-20260227.js`
+Create: `projects/demo-20260227.js` relative to this skill directory (create `projects/` if it does not exist).
 
 ```javascript
 const SLIDES = [
@@ -84,7 +84,7 @@ module.exports = { SLIDES };
 
 ### 2) Preview as HTML
 
-From `D:\SKILL\project\ppt`:
+From this skill directory (`meddraft_ai/prompts/medical_research_skills/scientific-skills/Other/ppt`):
 
 ```bash
 python build_html.py demo-20260227
@@ -98,9 +98,7 @@ python convert_to_pptx.py demo-20260227
 
 ### 4) Output location
 
-Generated files are written to:
-
-- `D:\SKILL\project\ppt\output\`
+Generated files are written to `output/` inside this skill directory.
 
 ## Implementation Details
 

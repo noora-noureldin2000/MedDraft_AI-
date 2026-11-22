@@ -10,6 +10,29 @@ license: Proprietary. LICENSE.txt has complete terms
 
 A .pptx file is a ZIP archive containing XML files and resources. Create, edit, or analyze PowerPoint presentations using text extraction, raw XML access, or html2pptx workflows. Apply this skill for programmatic presentation creation and modification.
 
+## MedDraft deck path (Python, no html2pptx)
+
+For a deck built from an outline with native, editable shapes, use the repo's
+first-class pack instead of the HTML pipeline:
+
+```bash
+python meddraft_ai/prompts/pptx/scripts/deck_builder.py deck.json -o talk.pptx
+```
+
+It provides the 16:9 design engine, a JSON blueprint schema, figure slides, and
+speaker notes. When a slide needs a real image, fill the slot through the
+quota-aware search chain before building:
+
+```bash
+python meddraft_ai/prompts/pptx/scripts/fetch_figures.py --blueprint deck.json
+```
+
+See `meddraft_ai/prompts/pptx/SKILL.md` for the workflow, image policy, and
+licensing rules, and `references/figure-sourcing.md` for provider quotas and
+failure handling. Use the html2pptx workflow below when the user specifically
+wants HTML-authored slides or a template-driven conversion.
+
+
 ## Visual Enhancement with Scientific Schematics
 
 **When creating documents with this skill, always consider adding scientific diagrams and schematics to enhance visual communication.**

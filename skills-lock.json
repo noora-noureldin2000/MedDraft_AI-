@@ -195,6 +195,11 @@
       "source": "./.agents/skills/pdf",
       "sourceType": "local",
       "computedHash": "71545cb640117e9ced95dde5021973b75caa43ae6af9e991b56eac2f3a112426"
+    },
+    "pptx": {
+      "source": "./.agents/skills/pptx",
+      "sourceType": "local",
+      "computedHash": "e5b887d86f101037c4ebe5dcc82e9c062efa25eea38939321ad7d251a0edd77c"
     }
   }
 }

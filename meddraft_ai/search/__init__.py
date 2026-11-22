@@ -38,6 +38,7 @@ from .image_search import (
     IMAGE_SEARCH_TOOL_SCHEMA,
     IMAGE_SEARCH_RENDERING_HINT,
 )
+from .image_fetch import download_image, fetch_figures, slugify
 
 __all__ = [
     "search_pubmed_api",
@@ -72,4 +73,7 @@ __all__ = [
     "IMAGE_SEARCH_TOOL_NAME",
     "IMAGE_SEARCH_TOOL_SCHEMA",
     "IMAGE_SEARCH_RENDERING_HINT",
+    "download_image",
+    "fetch_figures",
+    "slugify",
 ]

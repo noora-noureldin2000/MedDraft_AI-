@@ -241,6 +241,7 @@ Three skill layers are wired into the pipeline:
 | `surgical-word-reduction` | 3-pass surgical word-count reduction (structural trim → syntactic tightening → micro-polish) with section protocols, replacement dictionary, and preservation checklist |
 | `academic-search-agent` | Three-phase Scholar playbook: breadth angles → authoritative deep-reads → single-question iteration with word budgets |
 | `pdf` | PDF toolkit: layout-aware text/table extraction, scanned-PDF OCR fallback, merge/split/rotate/metadata, and fillable or annotation-based form filling (mirrored in `meddraft_ai/prompts/pdf/`) |
+| `pptx` | Deck builder: 16:9 native-shape design engine (blueprint → `.pptx`) plus quota-aware figure sourcing through the SerpApi → Brave → Playwright image chain (legacy Google CSE opt-in; mirrored in `meddraft_ai/prompts/pptx/`) |
 
 **Nature Paper Skills layer (20 skills)** — manuscript integrity, revision, and submission skills from [Boom5426/Nature-Paper-Skills](https://github.com/Boom5426/Nature-Paper-Skills) (upstream v0.2.0; MIT + Apache-2.0, see `meddraft_ai/prompts/nature-paper-skills/`). Wiring: `meddraft_ai/core/nature_integration.py`, auto-routed by `match_skill_for_task()`, carried by the existing specialists plus the new `RebuttalSpecialist`:
 
